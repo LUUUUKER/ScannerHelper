@@ -4,6 +4,7 @@ Before writing or changing code, read:
 
 1. `docs/SCANNER_HELPER_SPEC.md`
 2. `docs/IMPLEMENTATION_PLAN.md`
+3. `docs/TEST_PLAN_PHASE_A.md` — approved test cases for Tasks 1–3, plus nine resolved design decisions (D-1…D-9) that the implementation must honor
 
 These files are the source of truth. Do not silently reinterpret business behavior.
 
