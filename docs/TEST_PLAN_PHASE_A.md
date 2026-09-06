@@ -14,8 +14,8 @@ Test IDs are stable and map one-to-one onto test method names. Reference them in
 |---|---|---|
 | 1 | Solution boundaries and layering guards | 6 (3 build checks + 3 tests) |
 | 2 | Domain types, mode, parsing, validation | 80 |
-| 3 | Settings model and JSON persistence | 27 |
-| | **Total** | **113** |
+| 3 | Settings model and JSON persistence | 28 |
+| | **Total** | **114** |
 
 Task 2 breakdown: ModeManager 7, FixedPosition 16, Regex parser 11, Length 11, CharacterSet 13, Regex validator 7, Composite 9, result types 6.
 
@@ -36,6 +36,7 @@ These were open questions during planning. All are now settled; the test cases b
 | D-7 | A failed result makes its value **unreachable at compile time** — a discriminated result type, not a runtime throw. | Unreachable beats throwing: the mistake cannot ship. |
 | D-8 | A `SchemaVersion` **newer than** the running application is treated as corruption: back up, load defaults, emit a diagnostic. | Guessing at a future format silently discards configuration. |
 | D-9 | The raw code is **never trimmed** of surrounding whitespace. | A scanner should not emit whitespace. If it does, that is an anomaly validation must surface, not something the parser quietly hides. |
+| D-10 | Appending a trailing Enter to emitted output is a setting, `AppendEnterAfterScan`, **default disabled**. | The scanner's own Enter is always swallowed, so with the default the page receives none at all. Whether it needs one cannot be known before the pilot. One boolean makes the answer switchable on the floor instead of requiring a rebuild. The output behavior itself is Task 7; only the setting's default and round-trip are tested here. |
 
 ---
 
@@ -208,39 +209,40 @@ Positions are 1-based (spec §8.1).
 | S7 | `FullWindowAlwaysOnTop` | `false` |
 | S8 | `Hotkeys` | F8 / F10 / Esc; **Pause/Resume unassigned** (spec §13.3) |
 | S9 | `SkuValidation.IgnoreCase` | `true` (spec §9.2) |
+| S10 | `AppendEnterAfterScan` | **`false`** (D-10, spec §10) |
 
 ### 5.2 Must never be persisted
 
 | ID | Test | Expected |
 |---|---|---|
-| S10 | `AppSettings` exposes no scan-mode property | Reflection assertion — impossible by construction (spec §14) |
-| S11 | `AppSettings` exposes no paused-state property | Reflection assertion (spec §5.7) |
-| S12 | Serialized JSON text | Contains no `mode` or `paused` key in any casing |
+| S11 | `AppSettings` exposes no scan-mode property | Reflection assertion — impossible by construction (spec §14) |
+| S12 | `AppSettings` exposes no paused-state property | Reflection assertion (spec §5.7) |
+| S13 | Serialized JSON text | Contains no `mode` or `paused` key in any casing |
 
 ### 5.3 Load and save
 
 | ID | Scenario | Expected |
 |---|---|---|
-| S13 | File missing → Load | Defaults returned, no exception, **no file created** |
-| S14 | Directory missing → Save | Directory created |
-| S15 | Save → Load round trip | Every field equal, including nested Hotkeys, Parsing, Validation |
-| S16 | Atomic save | No `.tmp` file remains after a successful save |
-| S17 | Failure midway through a save | The previous file is **intact**; no partial file is left behind |
-| S18 | IO error on save | Raises a catchable error; does not crash and does not corrupt the existing file |
-| S19 | Store resolves its own directory | Via `Environment.SpecialFolder.ApplicationData`; tests inject a temp directory instead |
+| S14 | File missing → Load | Defaults returned, no exception, **no file created** |
+| S15 | Directory missing → Save | Directory created |
+| S16 | Save → Load round trip | Every field equal, including nested Hotkeys, Parsing, Validation, and `AppendEnterAfterScan` |
+| S17 | Atomic save | No `.tmp` file remains after a successful save |
+| S18 | Failure midway through a save | The previous file is **intact**; no partial file is left behind |
+| S19 | IO error on save | Raises a catchable error; does not crash and does not corrupt the existing file |
+| S20 | Store resolves its own directory | Via `Environment.SpecialFolder.ApplicationData`; tests inject a temp directory instead |
 
 ### 5.4 Corruption and compatibility
 
 | ID | Input file | Expected |
 |---|---|---|
-| S20 | Malformed JSON `{{{` | Defaults returned, file **renamed** to `settings.corrupt-1.json`, diagnostic event emitted |
-| S21 | Empty file | As S20 |
-| S22 | Content is `null` | As S20 |
-| S23 | Well-formed JSON of the wrong shape, e.g. `[1,2,3]` | As S20 |
-| S24 | `settings.corrupt-1.json` already exists and corruption recurs | Backed up as `-2`; the earlier backup is not overwritten |
-| S25 | Missing newer field, e.g. an older config without `IgnoreCase` | That field takes its default; everything else loads normally |
-| S26 | Unknown extra fields written by a future version | Ignored without error |
-| S27 | `SchemaVersion` newer than the application | Treated as corruption per D-8 |
+| S21 | Malformed JSON `{{{` | Defaults returned, file **renamed** to `settings.corrupt-1.json`, diagnostic event emitted |
+| S22 | Empty file | As S21 |
+| S23 | Content is `null` | As S21 |
+| S24 | Well-formed JSON of the wrong shape, e.g. `[1,2,3]` | As S21 |
+| S25 | `settings.corrupt-1.json` already exists and corruption recurs | Backed up as `-2`; the earlier backup is not overwritten |
+| S26 | Missing newer field, e.g. an older config without `IgnoreCase` | That field takes its default; everything else loads normally |
+| S27 | Unknown extra fields written by a future version | Ignored without error |
+| S28 | `SchemaVersion` newer than the application | Treated as corruption per D-8 |
 
 ---
 
@@ -261,7 +263,7 @@ Deferred to Phase B, on Windows with real hardware. Do not simulate these with u
 
 ## 7. Summary
 
-113 cases across three tasks, all runnable on macOS with `dotnet test`.
+114 cases across three tasks, all runnable on macOS with `dotnet test`.
 
 Two of them do disproportionate work. **R8/V4** force parse and validation timeouts to carry a reason code distinct from a plain non-match, which is what makes an on-site rule problem diagnosable. **D5/D6** keep user-facing text out of `Core`, without which the Chinese UI cannot be correct and the defect stays hidden until localization begins.
 

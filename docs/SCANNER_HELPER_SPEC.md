@@ -198,7 +198,7 @@ PAUSED
 - Collect scanner characters into a buffer.
 - Scan suffix is assumed to be Enter for V1 unless later made configurable.
 - Enter terminates the scan.
-- **The terminating Enter is consumed, not forwarded.** It marks the end of the scan and is discarded along with the rest of the raw scanner input. See section 10 for the resulting output contract.
+- **The terminating Enter is consumed, not forwarded.** It marks the end of the scan and is discarded along with the rest of the raw scanner input. Whether Scanner Helper emits an Enter of its own afterwards is a separate, configurable decision — see section 10.
 - User keyboard input during active scanning is not supported by the business workflow; do not attempt interleaving.
 - Apply a scan inactivity timeout. Initial implementation default: approximately 300 ms since the last scanner character, but keep it configurable internally and validate with real hardware before finalizing.
 
@@ -487,9 +487,18 @@ Also use a finite regex timeout.
 Every emission — normal success and Force Send alike — follows the same contract:
 
 - Emitted via `SendInput` with `KEYEVENTF_UNICODE`, one character at a time (see 2.2).
-- **Content only. No Enter, and no other terminator, is appended.**
+- Content is emitted exactly as produced by the current mode — no trimming, no padding, no case conversion.
+- A trailing Enter is appended **only if** the `Append Enter after scan` setting is enabled. **Default: disabled.**
 
-> ⚠️ **Assumption pending hardware validation.** Because the entire raw scan is swallowed, the scanner's own terminating Enter never reaches the business application either — so the web application receives **no Enter at all** from a scan. Barcode entry in web forms commonly relies on Enter to submit or to advance to the next field. If pilot testing shows the page no longer submits, promote this to a `Append Enter after scan` setting (default on) rather than hardcoding the opposite behavior. Track this explicitly during the pilot; it is a known open risk, not a settled design.
+#### Why this is a setting rather than a constant
+
+Because the entire raw scan is swallowed, the scanner's own terminating Enter never reaches the business application either. With the setting disabled, the web application therefore receives **no Enter at all** from a scan — not "one fewer than before", but zero.
+
+Barcode entry in web forms commonly relies on Enter to submit or to advance to the next field. Whether this particular application does is not yet known, and it cannot be determined without the real page.
+
+Making it a setting costs one boolean and one branch, and means the answer can be changed **on the pilot floor in seconds** instead of requiring a code change, a rebuild, and a redeployment. The default is disabled per the product decision; if the page stops submitting during the pilot, enable it and move on.
+
+This is a deliberately cheap hedge against an unknown, not an unresolved design question.
 
 ### Normal success
 
@@ -796,6 +805,7 @@ This is the primary tool for verifying a newly configured parsing rule against r
 - Force Send hotkey, default F10
 - Cancel hotkey, default Esc
 - Pause/Resume hotkey, **default unassigned** — optional convenience only. The mouse-clickable Pause control in the Full and Compact windows is mandatory and is never replaced by this hotkey (see 5.7).
+- `Append Enter after scan` / `扫描后自动回车`, **default disabled** (see section 10). Applies to both SN and SKU output and to Force Send. Place it here rather than under SKU Parsing, since it is not mode-specific.
 
 Startup mode is always SN and should not be exposed as an ordinary setting. The paused state is likewise never persisted and never exposed as a startup preference.
 
@@ -841,6 +851,7 @@ AppSettings
   ModeSwitchSoundEnabled
   ErrorSoundEnabled
   RememberWindowPosition
+  AppendEnterAfterScan     (default false)
   FullWindowAlwaysOnTop
   FullWindowBounds
   CompactWindowBounds
@@ -1195,7 +1206,7 @@ Must be verified on real Windows hardware via the harness:
 - Compact -> error Full -> resolve -> Compact restoration
 - Disconnect/reconnect behavior
 - Hundreds/thousands of sequential scans without degradation
-- Emitted output contains **no trailing Enter** (section 10), and the business web application still behaves acceptably — if it does not, the open risk in section 10 has materialized
+- With `Append Enter after scan` disabled (the default), emitted output contains no trailing Enter and the business web application still behaves acceptably. **If the page no longer submits, enable the setting on the spot and confirm it does** — this is the specific scenario the setting exists for, and the pilot must record which way it went
 - Ordinary typing and IME composition still work while Scanner Helper is active
 - PAUSED: scanner input passes straight through untouched; the pause control is reachable **with the mouse only**; resuming restores the previous mode
 - Silent-unhook detection: with the hook forcibly removed, the heartbeat notices, re-installs or fails loudly, and never keeps displaying a confident operational state (section 19.1)
@@ -1239,10 +1250,64 @@ A global low-level keyboard hook that captures keystrokes and synthesizes input 
 
 This is not hypothetical, and it is not something the code can defend against. Mitigation is organizational and must start **before** the pilot, not after a machine is quarantined:
 
-- **Code-sign the executable** with a real code-signing certificate. An unsigned binary doing this is close to guaranteed to be flagged. Lead time to obtain a certificate is measured in days to weeks — start early.
+- **Code-sign the executable** with a real code-signing certificate (see 22.1.1). An unsigned binary doing this is close to guaranteed to be flagged. Lead time is measured in days to weeks — start early.
 - **Get an explicit allow-list entry from warehouse IT** for the signed binary and its install path, on every pilot machine.
 - **Have a named IT contact** who can re-allow the application if a definition update flags it later.
 - Note that a *blocked hook* may present exactly like the silent-unhook failure in section 19.1. The heartbeat detection is what turns this into a visible failure instead of silent bad data.
+
+#### 22.1.1 Obtaining a code-signing certificate
+
+Practical guidance, since this has the longest lead time of anything in the project and is easy to discover too late.
+
+**Certificate types**
+
+| Type | What it gives you | Trade-off |
+|---|---|---|
+| **OV** (Organization Validation) | A valid signature; the publisher name shows instead of "Unknown Publisher" | SmartScreen reputation must still accumulate over downloads/time, so early installs may still warn |
+| **EV** (Extended Validation) | Same, plus **immediate SmartScreen reputation** — no warning from day one | More expensive; stricter identity vetting |
+
+For a warehouse tool installed by IT on a handful of machines, **OV is usually sufficient**, because IT is allow-listing the binary anyway and SmartScreen reputation matters most for public downloads. Choose EV if the warehouse's security policy demands it or if SmartScreen prompts would confuse operators during rollout.
+
+**What is required**
+
+- **A legal business entity.** Certificate authorities verify an organization, not a person. Individual code-signing certificates exist at some CAs but are harder to obtain and less useful here. **Decide early whose entity signs this** — yours or the warehouse's. This is a business decision that gates everything else.
+- Verifiable business registration, plus presence in a third-party business directory or an acceptable legal/accountant attestation.
+- A verifiable phone number at the registered organization; CAs typically place a verification call.
+- **Hardware key storage.** Since 2023, publicly trusted code-signing private keys must live on a FIPS-validated hardware token or a cloud HSM. Expect either a shipped USB token or a cloud signing service. Physical token shipping adds days — factor it in.
+
+**Common issuers:** DigiCert, Sectigo, GlobalSign, SSL.com. Pricing is typically low hundreds of USD per year, varying by type and term; verify current pricing directly, as it changes.
+
+**Realistic timeline**
+
+| Stage | Typical |
+|---|---|
+| Gathering documents | 1–5 days, longer if registration details are stale or inconsistent |
+| CA verification | 1–5 business days once documents are clean |
+| Hardware token delivery | several days, if physical |
+| **Total** | **roughly 1–3 weeks**, and considerably longer if the entity is not already in the business directories CAs consult |
+
+**Signing**
+
+Sign the release build, and **always timestamp it**:
+
+```text
+signtool sign /fd SHA256 /tr <timestamp-server-url> /td SHA256 ScannerHelper.exe
+```
+
+Timestamping is not optional. Without it, every signature becomes invalid the moment the certificate expires, and already-deployed copies start failing.
+
+**If signing is not possible for the pilot**
+
+A pilot can proceed unsigned, but understand what is being accepted:
+
+- SmartScreen warns on every machine at install time.
+- EDR is substantially more likely to quarantine the binary.
+- IT must allow-list **per machine**, by hash or path, and a rebuild changes the hash — every new build needs re-allow-listing.
+- A definition update can re-flag the application at any time, with no warning.
+
+Treat unsigned deployment as a time-boxed pilot concession, not a shipping posture. Start the certificate process in parallel regardless.
+
+**Signing is not a complete answer.** A valid signature establishes *who* wrote the software; it does not make hooking-plus-`SendInput` look less like a keylogger to behavioral detection. Signing plus an explicit IT allow-list entry is the combination that works. Plan for both.
 
 ### 22.2 Privilege mismatch
 

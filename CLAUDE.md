@@ -15,7 +15,7 @@ These files are the source of truth. Do not silently reinterpret business behavi
 - V1 uses user-mode Raw Input + `WH_KEYBOARD_LL` + event correlation + `SendInput`; no kernel driver.
 - A technical input-correlation spike must pass before building the complete application. It is split into 4a (observe only) and 4b (intercept); 4a's measurements must exist before 4b is written.
 - `ScannerHelper.Core` targets `net8.0`, references nothing, and must build and unit-test on macOS. All native code lives in `ScannerHelper.Win32` (`net8.0-windows`) and implements interfaces `Core` defines. Dependencies point inward.
-- The business application is a web app at normal (non-elevated) privilege. Output is `SendInput` + `KEYEVENTF_UNICODE`, content only — **never append Enter**.
+- The business application is a web app at normal (non-elevated) privilege. Output is `SendInput` + `KEYEVENTF_UNICODE`. A trailing Enter is appended only when `AppendEnterAfterScan` is enabled; **its default is disabled**. The scanner's own terminating Enter is always swallowed.
 - `PAUSED` is a required safety valve: hook passes everything through, and the control must be reachable **with the mouse alone** from both Full and Compact.
 - Silent-unhook heartbeat detection is required. The UI must never display a confident operational state it has not verified.
 - Startup scan mode is always SN and is never persisted.

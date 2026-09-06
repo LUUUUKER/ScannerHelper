@@ -24,7 +24,7 @@
 - Error expansion must not steal business-app focus.
 - English and Simplified Chinese required from first release.
 - Mandatory Raw Input + hook correlation spike before full application implementation.
-- Business application is a **web app at normal privilege**; output is `SendInput` + `KEYEVENTF_UNICODE`, content only, **no Enter appended** (spec 2.1, 2.2, 10).
+- Business application is a **web app at normal privilege**; output is `SendInput` + `KEYEVENTF_UNICODE`. A trailing Enter is appended only if `AppendEnterAfterScan` is enabled — **default disabled** (spec 2.1, 2.2, 10).
 - `PAUSED` is a required safety valve with a **mouse-clickable** control in both Full and Compact (spec 5.7).
 - Silent-unhook heartbeat detection is required (spec 19.1).
 - `ScannerHelper.Core` targets `net8.0` and must build and test on non-Windows.
@@ -202,7 +202,7 @@ src/ScannerHelper.Core/Settings/JsonSettingsStore.cs
 - Save atomically via temporary file + replace/move.
 - Never store current SN/SKU mode.
 - **Never store the paused state** (spec 5.7).
-- Persist language, window position, Full topmost preference, sound settings, scanner binding, parsing, validation (**including `IgnoreCase`**), log masking, hotkeys (**including the optional unassigned Pause/Resume hotkey**).
+- Persist language, window position, Full topmost preference, sound settings, `AppendEnterAfterScan` (**default false**), scanner binding, parsing, validation (**including `IgnoreCase`**), log masking, hotkeys (**including the optional unassigned Pause/Resume hotkey**).
 
 `JsonSettingsStore` resolves its directory via `Environment.SpecialFolder.ApplicationData`, which works on macOS too. Tests must inject a temp directory rather than writing to the real profile.
 
@@ -360,10 +360,12 @@ src/ScannerHelper.Win32/SendInputKeyboardOutputService.cs        (Phase B — im
 **Output contract (spec 2.2, 10):**
 
 - Emit via `SendInput` with `KEYEVENTF_UNICODE`, one character at a time.
-- **Content only — append no Enter and no other terminator.**
+- Content emitted exactly as the mode produced it — no trimming, padding, or case conversion.
+- Append a trailing Enter **only if** `AppendEnterAfterScan` is enabled. **Default disabled.**
+- The setting applies to SN output, SKU output, and Force Send alike.
 - Tag every synthetic event so the capture pipeline recognizes and ignores it.
 
-> Open risk carried into the pilot: because the scan's own Enter is swallowed, the web application receives no Enter at all. If pages stop submitting, promote this to an `Append Enter after scan` setting (default on). Record the pilot observation either way.
+> The scan's own Enter is always swallowed, so with the default the web application receives no Enter at all. Whether that page needs one is unknown until the pilot. One boolean and one branch makes it switchable on the floor in seconds instead of requiring a rebuild and redeploy.
 
 **Behavior:**
 
@@ -376,7 +378,7 @@ src/ScannerHelper.Win32/SendInputKeyboardOutputService.cs        (Phase B — im
 - Injected events are marked/detected and bypass scanner capture.
 - F10/Esc outside pending error do not alter business input unexpectedly.
 
-Phase A: test the whole domain workflow against a fake `IKeyboardOutputService` — success auto-emits, error never auto-emits, F10 emits the stored raw scan exactly, Esc emits nothing, mode preserved in both cases, and **no emission ever carries a trailing Enter**.
+Phase A: test the whole domain workflow against a fake `IKeyboardOutputService` — success auto-emits, error never auto-emits, F10 emits the stored raw scan exactly, Esc emits nothing, mode preserved in both cases, and **both states of `AppendEnterAfterScan` produce exactly the expected output** (disabled → no trailing Enter; enabled → exactly one, on SN, SKU, and Force Send alike).
 
 Phase B: verify actual `SendInput` reaching a focused control. This is one of the few Windows-side checks that genuinely automates, so it may live in a small Windows-only-guarded xUnit project rather than the manual harness.
 
@@ -548,7 +550,7 @@ src/ScannerHelper.App/ViewModels/SettingsViewModel.cs
 
 **General:** language, startup, sounds, remember window position, Full topmost preference.
 
-**Scan Mode:** F8/F10/Esc defaults, optional **unassigned-by-default Pause/Resume hotkey**, and conflict validation. The hotkey never replaces the mandatory mouse-clickable pause control.
+**Scan Mode:** F8/F10/Esc defaults, optional **unassigned-by-default Pause/Resume hotkey**, conflict validation, and the **`Append Enter after scan` toggle (default off)**. The hotkey never replaces the mandatory mouse-clickable pause control.
 
 Commit.
 
@@ -630,7 +632,7 @@ Stress test:
 - Full/Compact switching under 125%/150% DPI
 - pause and resume **using the mouse only**, from both Full and Compact; verify scanner input passes through untouched while paused and the prior mode returns on resume
 - forcibly remove the hook and confirm the heartbeat notices, re-hooks or fails loudly, and never keeps showing a confident operational state
-- confirm emitted output carries **no trailing Enter** and that the business web application still behaves acceptably — if it does not, the section 10 open risk has materialized and the `Append Enter` setting is needed
+- with `AppendEnterAfterScan` off (default), confirm the business web application still submits correctly; **if it does not, enable the setting on the spot, confirm it fixes the page, and record which way the pilot went**
 - ordinary typing and IME composition remain usable in the business application while Scanner Helper is active
 
 **Deployment readiness (spec 22) — start early, these have lead times:**
