@@ -1,0 +1,475 @@
+<title>Scanner Helper — 状态配色验证</title>
+
+<style>
+  /* ---------- tokens ---------- */
+  :root {
+    --ground:   #F4F6F7;
+    --surface:  #FFFFFF;
+    --sunken:   #E9EDEF;
+    --rule:     #D5DBDF;
+    --ink:      #14181B;
+    --ink-2:    #4A555E;
+    --ink-3:    #79858E;
+    --shadow:   0 1px 2px rgba(20,24,27,.06), 0 8px 24px rgba(20,24,27,.07);
+
+    /* product state colors — the only saturated color on this page */
+    --sn:       #1B7A3D;
+    --sku:      #1B5FA8;
+    --error:    #B3261E;
+    --idle:     #414B56;
+    --on-color: #FFFFFF;
+
+    --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+    --ui: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --ground:  #0E1113;
+      --surface: #181C1F;
+      --sunken:  #101416;
+      --rule:    #2B3236;
+      --ink:     #EDF1F3;
+      --ink-2:   #A3AEB6;
+      --ink-3:   #6F7A82;
+      --shadow:  0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.45);
+    }
+  }
+  :root[data-theme="dark"] {
+    --ground:  #0E1113;
+    --surface: #181C1F;
+    --sunken:  #101416;
+    --rule:    #2B3236;
+    --ink:     #EDF1F3;
+    --ink-2:   #A3AEB6;
+    --ink-3:   #6F7A82;
+    --shadow:  0 1px 2px rgba(0,0,0,.5), 0 8px 24px rgba(0,0,0,.45);
+  }
+  :root[data-theme="light"] {
+    --ground:  #F4F6F7;
+    --surface: #FFFFFF;
+    --sunken:  #E9EDEF;
+    --rule:    #D5DBDF;
+    --ink:     #14181B;
+    --ink-2:   #4A555E;
+    --ink-3:   #79858E;
+    --shadow:  0 1px 2px rgba(20,24,27,.06), 0 8px 24px rgba(20,24,27,.07);
+  }
+
+  /* ---------- page ---------- */
+  body {
+    margin: 0;
+    background: var(--ground);
+    color: var(--ink);
+    font-family: var(--ui);
+    line-height: 1.55;
+    -webkit-font-smoothing: antialiased;
+  }
+  .wrap {
+    max-width: 1120px;
+    margin: 0 auto;
+    padding: 56px 24px 96px;
+    display: flex;
+    flex-direction: column;
+    gap: 64px;
+  }
+
+  .eyebrow {
+    font-family: var(--mono);
+    font-size: 11px;
+    letter-spacing: .14em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+    margin: 0 0 10px;
+  }
+  h1 {
+    font-size: clamp(28px, 4vw, 40px);
+    line-height: 1.15;
+    letter-spacing: -.02em;
+    font-weight: 700;
+    margin: 0 0 14px;
+    text-wrap: balance;
+  }
+  h2 {
+    font-size: 19px;
+    letter-spacing: -.01em;
+    font-weight: 650;
+    margin: 0;
+  }
+  .lede { max-width: 62ch; color: var(--ink-2); margin: 0; font-size: 15.5px; }
+
+  .sec { display: flex; flex-direction: column; gap: 22px; }
+  .sec-head { display: flex; flex-direction: column; gap: 6px; border-top: 1px solid var(--rule); padding-top: 18px; }
+  .sec-head p { margin: 0; color: var(--ink-2); font-size: 14.5px; max-width: 66ch; }
+
+  /* ---------- window mockups ---------- */
+  .states {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(224px, 1fr));
+    gap: 18px;
+  }
+  .win {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    overflow: hidden;
+    box-shadow: var(--shadow);
+    display: flex;
+    flex-direction: column;
+  }
+  .chrome {
+    display: flex; align-items: center; justify-content: space-between;
+    padding: 7px 10px;
+    background: var(--sunken);
+    border-bottom: 1px solid var(--rule);
+    font-size: 11px; color: var(--ink-3);
+    font-family: var(--mono);
+  }
+  .chrome span:last-child { letter-spacing: .18em; }
+
+  .face {
+    background: var(--face);
+    color: var(--on-color);
+    padding: 26px 18px 22px;
+    min-height: 178px;
+    display: flex; flex-direction: column; gap: 4px;
+    position: relative;
+  }
+  .face.sn    { --face: var(--sn); }
+  .face.sku   { --face: var(--sku); }
+  .face.err   { --face: var(--error); }
+  .face.pause { --face: var(--idle); }
+  .face.disc  { --face: var(--idle); }
+
+  .face .kicker {
+    font-family: var(--mono);
+    font-size: 10px; letter-spacing: .16em; text-transform: uppercase;
+    opacity: .72; margin-bottom: 8px;
+  }
+  .face .big {
+    font-size: 32px; font-weight: 750; letter-spacing: -.02em; line-height: 1.05;
+  }
+  .face .sub { font-size: 12.5px; opacity: .82; margin-top: 2px; }
+  .face .foot {
+    margin-top: auto; padding-top: 14px;
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .06em;
+    opacity: .78;
+  }
+  .face .glyph { font-size: 26px; line-height: 1; margin-bottom: 6px; }
+
+  /* non-color signatures */
+  .hazard {
+    position: absolute; inset: 0 0 auto 0; height: 7px;
+    background: repeating-linear-gradient(135deg,
+      rgba(255,255,255,.92) 0 7px, rgba(255,255,255,0) 7px 14px);
+  }
+  .redbar {
+    position: absolute; inset: 0 0 auto 0; height: 7px;
+    background: var(--error);
+  }
+
+  /* ---------- compact bars ---------- */
+  .compacts { display: flex; flex-wrap: wrap; gap: 12px; }
+  .cbar {
+    background: var(--cface);
+    color: var(--on-color);
+    border-radius: 5px;
+    padding: 9px 13px;
+    display: flex; align-items: center; gap: 12px;
+    font-weight: 700; letter-spacing: -.01em; font-size: 15px;
+    box-shadow: var(--shadow);
+    position: relative; overflow: hidden;
+  }
+  .cbar .ctl { font-family: var(--mono); font-size: 11px; opacity: .72; letter-spacing: .12em; }
+  .cbar.sn    { --cface: var(--sn); }
+  .cbar.sku   { --cface: var(--sku); }
+  .cbar.err   { --cface: var(--error); }
+  .cbar.pause { --cface: var(--idle); }
+  .cbar.disc  { --cface: var(--idle); }
+
+  /* ---------- vision sim ---------- */
+  .simbar { display: flex; flex-wrap: wrap; gap: 8px; }
+  .simbtn {
+    font: inherit; font-size: 13px;
+    padding: 7px 13px;
+    border-radius: 999px;
+    border: 1px solid var(--rule);
+    background: var(--surface);
+    color: var(--ink-2);
+    cursor: pointer;
+    transition: background .12s, color .12s, border-color .12s;
+  }
+  .simbtn:hover { border-color: var(--ink-3); color: var(--ink); }
+  .simbtn:focus-visible { outline: 2px solid var(--sku); outline-offset: 2px; }
+  .simbtn[aria-pressed="true"] {
+    background: var(--ink); color: var(--ground); border-color: var(--ink);
+  }
+  #stage { transition: filter .18s ease; }
+  #stage.f-prot  { filter: url(#prot); }
+  #stage.f-deut  { filter: url(#deut); }
+  #stage.f-trit  { filter: url(#trit); }
+  #stage.f-gray  { filter: grayscale(1); }
+  #stage.f-panel { filter: contrast(.72) saturate(.74) brightness(1.12); }
+  .simnote {
+    font-size: 13.5px; color: var(--ink-2); margin: 0;
+    min-height: 2.6em; max-width: 68ch;
+  }
+
+  /* ---------- table ---------- */
+  .tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 6px; background: var(--surface); }
+  table { border-collapse: collapse; width: 100%; font-size: 14px; }
+  th, td { text-align: left; padding: 11px 14px; border-bottom: 1px solid var(--rule); white-space: nowrap; }
+  th {
+    font-family: var(--mono); font-size: 10.5px; letter-spacing: .12em;
+    text-transform: uppercase; color: var(--ink-3); font-weight: 500;
+    background: var(--sunken);
+  }
+  tbody tr:last-child td { border-bottom: 0; }
+  td.num { font-family: var(--mono); font-variant-numeric: tabular-nums; }
+  .chip {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: 12.5px;
+  }
+  .dot { width: 15px; height: 15px; border-radius: 3px; border: 1px solid rgba(128,128,128,.35); }
+
+  /* ---------- notes ---------- */
+  .notes { display: grid; grid-template-columns: repeat(auto-fit, minmax(280px, 1fr)); gap: 16px; }
+  .note {
+    background: var(--surface); border: 1px solid var(--rule);
+    border-radius: 6px; padding: 16px 18px;
+    display: flex; flex-direction: column; gap: 7px;
+  }
+  .note h3 {
+    margin: 0; font-size: 14px; font-weight: 650; letter-spacing: -.005em;
+  }
+  .note p { margin: 0; font-size: 13.5px; color: var(--ink-2); }
+  .note code {
+    font-family: var(--mono); font-size: 12.5px;
+    background: var(--sunken); padding: 1px 5px; border-radius: 3px;
+  }
+  .tag {
+    align-self: flex-start;
+    font-family: var(--mono); font-size: 10px; letter-spacing: .14em;
+    text-transform: uppercase; padding: 3px 7px; border-radius: 3px;
+    background: var(--sunken); color: var(--ink-3);
+  }
+  .tag.warn { background: rgba(179,38,30,.14); color: #D8483F; }
+
+  @media (prefers-reduced-motion: reduce) {
+    * { transition: none !important; animation: none !important; }
+  }
+</style>
+
+<svg width="0" height="0" style="position:absolute" aria-hidden="true">
+  <filter id="prot" color-interpolation-filters="linearRGB">
+    <feColorMatrix type="matrix" values="0.567 0.433 0 0 0  0.558 0.442 0 0 0  0 0.242 0.758 0 0  0 0 0 1 0"/>
+  </filter>
+  <filter id="deut" color-interpolation-filters="linearRGB">
+    <feColorMatrix type="matrix" values="0.625 0.375 0 0 0  0.70 0.30 0 0 0  0 0.30 0.70 0 0  0 0 0 1 0"/>
+  </filter>
+  <filter id="trit" color-interpolation-filters="linearRGB">
+    <feColorMatrix type="matrix" values="0.95 0.05 0 0 0  0 0.433 0.567 0 0  0 0.475 0.525 0 0  0 0 0 1 0"/>
+  </filter>
+</svg>
+
+<div class="wrap">
+
+  <header>
+    <p class="eyebrow">Scanner Helper · V1 · 配色验证</p>
+    <h1>五个状态的颜色</h1>
+    <p class="lede">
+      SN 用绿、SKU 用蓝。目标是<strong>醒目但不刺眼</strong> —— 工人隔着几米、在廉价显示器上、连续看八小时，
+      都要能一眼分辨当前模式。所有色值配白字后对比度均超过 WCAG AA 标准。
+    </p>
+  </header>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>主窗口</h2>
+      <p>大面积色块采用深而低饱和的色调。纯饱和色在长班次下会造成明显视疲劳，这是"醒目"与"刺眼"的分界线。</p>
+    </div>
+    <div class="states">
+
+      <div class="win">
+        <div class="chrome"><span>Scanner Helper</span><span>— □ ✕</span></div>
+        <div class="face sn">
+          <div class="kicker">当前模式</div>
+          <div class="big">SN MODE</div>
+          <div class="sub">原样输出完整条码</div>
+          <div class="foot">F8 切换 · 扫码枪已连接</div>
+        </div>
+      </div>
+
+      <div class="win">
+        <div class="chrome"><span>Scanner Helper</span><span>— □ ✕</span></div>
+        <div class="face sku">
+          <div class="kicker">当前模式</div>
+          <div class="big">SKU MODE</div>
+          <div class="sub">从条码中提取 SKU</div>
+          <div class="foot">F8 切换 · 扫码枪已连接</div>
+        </div>
+      </div>
+
+      <div class="win">
+        <div class="chrome"><span>Scanner Helper</span><span>— □ ✕</span></div>
+        <div class="face err">
+          <div class="hazard"></div>
+          <div class="glyph">⚠</div>
+          <div class="big" style="font-size:26px">校验失败</div>
+          <div class="sub">SKU 长度应为 8 位，实际 6 位</div>
+          <div class="foot">F10 强制发送 · Esc 取消</div>
+        </div>
+      </div>
+
+      <div class="win">
+        <div class="chrome"><span>Scanner Helper</span><span>— □ ✕</span></div>
+        <div class="face pause">
+          <div class="glyph">⏸</div>
+          <div class="big" style="font-size:28px">PAUSED</div>
+          <div class="sub">扫码枪输入直接通过，未经处理</div>
+          <div class="foot">恢复后回到 SN MODE</div>
+        </div>
+      </div>
+
+      <div class="win">
+        <div class="chrome"><span>Scanner Helper</span><span>— □ ✕</span></div>
+        <div class="face disc">
+          <div class="redbar"></div>
+          <div class="glyph">⛔</div>
+          <div class="big" style="font-size:22px">扫码枪已断开</div>
+          <div class="sub">请检查 USB 连接</div>
+          <div class="foot">重新接入后自动恢复</div>
+        </div>
+      </div>
+
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>Compact 悬浮条</h2>
+      <p>程序大部分时间处于这个形态。尺寸小，颜色承担更多识别工作，但文字标签始终保留。</p>
+    </div>
+    <div class="compacts">
+      <div class="cbar sn">SN MODE <span class="ctl">⏸ □ ✕</span></div>
+      <div class="cbar sku">SKU MODE <span class="ctl">⏸ □ ✕</span></div>
+      <div class="cbar err"><span class="hazard"></span>⚠ 校验失败 <span class="ctl">□ ✕</span></div>
+      <div class="cbar pause">⏸ PAUSED <span class="ctl">▶ □ ✕</span></div>
+      <div class="cbar disc"><span class="redbar"></span>⛔ 已断开 <span class="ctl">⏸ □ ✕</span></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>色觉与显示器模拟</h2>
+      <p>切换下面的模式，观察五个状态是否仍然可区分。重点看 <strong>SN 绿</strong> 与 <strong>SKU 蓝</strong> —— 这是工人需要频繁分辨的一对。</p>
+    </div>
+
+    <div class="simbar" role="group" aria-label="视觉模拟">
+      <button class="simbtn" type="button" data-f="" aria-pressed="true">正常视觉</button>
+      <button class="simbtn" type="button" data-f="f-deut" aria-pressed="false">绿色盲 · 约 6%</button>
+      <button class="simbtn" type="button" data-f="f-prot" aria-pressed="false">红色盲 · 约 2%</button>
+      <button class="simbtn" type="button" data-f="f-trit" aria-pressed="false">蓝黄色盲 · 罕见</button>
+      <button class="simbtn" type="button" data-f="f-gray" aria-pressed="false">完全无色觉</button>
+      <button class="simbtn" type="button" data-f="f-panel" aria-pressed="false">廉价 TN 屏发白</button>
+    </div>
+
+    <p class="simnote" id="note">五个状态在正常视觉下界限清晰。</p>
+
+    <div id="stage" class="compacts">
+      <div class="cbar sn">SN MODE <span class="ctl">⏸ □ ✕</span></div>
+      <div class="cbar sku">SKU MODE <span class="ctl">⏸ □ ✕</span></div>
+      <div class="cbar err"><span class="hazard"></span>⚠ 校验失败 <span class="ctl">□ ✕</span></div>
+      <div class="cbar pause">⏸ PAUSED <span class="ctl">▶ □ ✕</span></div>
+      <div class="cbar disc"><span class="redbar"></span>⛔ 已断开 <span class="ctl">⏸ □ ✕</span></div>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>色值表</h2>
+      <p>对比度按 WCAG 相对亮度公式计算，全部超过 AA 正文标准 4.5:1。</p>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>状态</th><th>背景</th><th>文字</th><th>对比度</th><th>非颜色线索</th></tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>SN 模式</td>
+            <td><span class="chip"><span class="dot" style="background:#1B7A3D"></span>#1B7A3D</span></td>
+            <td class="num">#FFFFFF</td><td class="num">5.4:1</td>
+            <td>大字 SN MODE ＋ 副标题</td>
+          </tr>
+          <tr>
+            <td>SKU 模式</td>
+            <td><span class="chip"><span class="dot" style="background:#1B5FA8"></span>#1B5FA8</span></td>
+            <td class="num">#FFFFFF</td><td class="num">6.5:1</td>
+            <td>大字 SKU MODE ＋ 副标题</td>
+          </tr>
+          <tr>
+            <td>错误</td>
+            <td><span class="chip"><span class="dot" style="background:#B3261E"></span>#B3261E</span></td>
+            <td class="num">#FFFFFF</td><td class="num">6.5:1</td>
+            <td>斜纹带、⚠、展开全窗、提示音、原因文字、F10/Esc</td>
+          </tr>
+          <tr>
+            <td>暂停</td>
+            <td><span class="chip"><span class="dot" style="background:#414B56"></span>#414B56</span></td>
+            <td class="num">#FFFFFF</td><td class="num">8.9:1</td>
+            <td>去饱和、⏸、PAUSED 文字</td>
+          </tr>
+          <tr>
+            <td>断开</td>
+            <td><span class="chip"><span class="dot" style="background:#414B56"></span>#414B56 ＋红条</span></td>
+            <td class="num">#FFFFFF</td><td class="num">8.9:1</td>
+            <td>顶部红条、⛔、断开文字</td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="sec">
+    <div class="sec-head">
+      <h2>三条需要注意的</h2>
+    </div>
+    <div class="notes">
+      <div class="note">
+        <span class="tag warn">需留意</span>
+        <h3>SN 绿与错误红</h3>
+        <p>这正是红绿色盲分不清的一对。但两者不是并列的模式，错误状态另有斜纹带、⚠、自动展开、提示音、原因文字五重线索。错误红也特意压得比 SN 绿更深，即使看不出色相也有明暗差。</p>
+      </div>
+      <div class="note">
+        <span class="tag warn">连带影响</span>
+        <h3>连接状态不能再用绿点</h3>
+        <p>SN 模式已经占用绿色，"扫码枪已连接"若也用绿点会造成语义冲突。改用 <code>✓</code> 加文字，保持中性色。</p>
+      </div>
+      <div class="note">
+        <span class="tag">已满足</span>
+        <h3>颜色是第三重线索</h3>
+        <p>规格 §11.2 要求不得仅靠颜色区分。每个状态都有独立的文字标签与图标，把上面的模拟切到"完全无色觉"仍然可读。</p>
+      </div>
+    </div>
+  </section>
+
+</div>
+
+<script>
+  const NOTES = {
+    "":        "五个状态在正常视觉下界限清晰。",
+    "f-deut":  "绿色盲（最常见类型）。SN 绿偏向黄褐，SKU 蓝保持不变 —— 工人需要频繁分辨的这一对仍然可区分。",
+    "f-prot":  "红色盲。红色整体变暗，这正是错误红被特意压深的原因：即使色相丢失，明暗差仍在。",
+    "f-trit":  "蓝黄色盲，极为罕见（约 0.01%）。蓝绿区分变弱，此时完全依赖文字标签。",
+    "f-gray":  "完全无色觉。颜色全部失效，只剩文字与图标 —— 这是规格 §11.2 的底线要求，此时仍应可用。",
+    "f-panel": "模拟廉价 TN 屏发白、低对比的显示效果。深色调在这里的优势最明显：浅色方案会直接糊掉。"
+  };
+  const stage = document.getElementById("stage");
+  const note = document.getElementById("note");
+  const btns = document.querySelectorAll(".simbtn");
+  btns.forEach(b => b.addEventListener("click", () => {
+    btns.forEach(o => o.setAttribute("aria-pressed", String(o === b)));
+    stage.className = "compacts" + (b.dataset.f ? " " + b.dataset.f : "");
+    note.textContent = NOTES[b.dataset.f];
+  }));
+</script>

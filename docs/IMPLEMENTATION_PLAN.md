@@ -456,9 +456,10 @@ src/ScannerHelper.App/UI/FocusSafeWindowPresenter.cs
 
 - Always visible and always topmost.
 - Draggable.
-- Current mode obvious by text/shape plus color.
-- Disconnected state visible.
+- Current mode obvious by text/shape plus color, using the normative palette in spec 11.2 (SN `#1B7A3D`, SKU `#1B5FA8`, error `#B3261E` + hazard stripe, paused/disconnected `#414B56`).
+- Disconnected state visible, with its red top bar.
 - Paused state visible.
+- Scanner connection indicator uses `✓` plus text in a neutral color — **not a green dot**, since SN Mode owns green (spec 11.2).
 - **Mouse-clickable Pause/Resume control — hard requirement (spec 5.7).** The failure this rescues is "the keyboard stopped working", so a hotkey-only escape hatch would be unusable in exactly the situation it exists for. Compact is where the application spends most of its time, which makes it the control the operator can actually reach.
 - Restore + close controls.
 - Never become invisible while process is running.

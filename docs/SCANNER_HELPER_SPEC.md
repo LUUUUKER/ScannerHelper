@@ -603,7 +603,7 @@ Paused:
 +----------------------------------+
 ```
 
-### 11.2 Visual differentiation
+### 11.2 Visual differentiation and state palette
 
 SN and SKU modes must be distinguishable by more than color.
 
@@ -615,6 +615,36 @@ Use:
 - color as an additional cue, not the only cue.
 
 Do not rely on color alone because of color-vision deficiency and low-quality warehouse displays.
+
+#### State palette
+
+Five states carry color. All contrast ratios are against white text and were computed with the WCAG relative-luminance formula; all exceed the AA threshold of 4.5:1.
+
+| State | Background | Text | Contrast | Non-color signature |
+|---|---|---|---|---|
+| SN Mode | `#1B7A3D` deep emerald | `#FFFFFF` | 5.4:1 | Large `SN MODE` + subtitle |
+| SKU Mode | `#1B5FA8` deep steel blue | `#FFFFFF` | 6.5:1 | Large `SKU MODE` + subtitle |
+| Error | `#B3261E` deep red, **plus a white diagonal hazard stripe along the top edge** | `#FFFFFF` | 6.5:1 | Hazard stripe, ⚠, auto-expand to Full, distinct sound, failure reason, F10/Esc prompts |
+| Paused | `#414B56` slate | `#FFFFFF` | 8.9:1 | Desaturated, ⏸, `PAUSED` text |
+| Disconnected | `#414B56` slate **plus a red top bar** | `#FFFFFF` | 8.9:1 | Red bar, ⛔, disconnected text |
+
+A rendered reference including color-vision and low-quality-display simulations lives at `docs/design/palette.html`.
+
+#### Why these values
+
+**Deep and desaturated, not vivid.** Large areas of highly saturated color cause measurable eye fatigue across an eight-hour shift. Depth plus white text achieves "noticeable" without "harsh", and holds up on the washed-out low-contrast panels common on warehouse workstations, where light or pastel schemes disappear entirely.
+
+**Green and blue for the two modes.** SN versus SKU is the distinction a worker makes constantly, so it must survive color-vision deficiency. Under deuteranopia and protanopia — the common forms, affecting roughly 8% of men — green shifts toward yellow-brown while blue is essentially unaffected, so the pair stays separable.
+
+**Saturation encodes activity.** The two operating modes carry hue; `PAUSED` and `DISCONNECTED` are deliberately drained to grey. *No color means nothing is being processed.* Grey differs from every hue by saturation rather than hue, so this distinction holds under every form of color blindness.
+
+**SN cannot also be grey**, even though it "just passes the code through". SN still runs the full pipeline — swallow, decode, re-emit — so it is an active state and must carry an active color. Only `PAUSED` bypasses the pipeline (see 5.7).
+
+**The error red is deliberately darker than the SN green.** Green-versus-red is precisely the pair red-green color blindness cannot resolve. Because SN and ERROR are sequential states rather than side-by-side choices, and because ERROR carries five further cues, the risk is contained — but the luminance gap is set intentionally so the states remain distinguishable even with hue entirely absent.
+
+#### Consequence: green is reserved
+
+Because SN Mode owns green, **the scanner connection indicator must not use a green dot.** A green "connected" light next to a green "SN MODE" panel creates two unrelated meanings for one color. Use a `✓` glyph with text in a neutral color instead.
 
 ### 11.3 Minimize means Compact
 
@@ -1107,8 +1137,11 @@ Use a professional industrial utility style:
 Accessibility:
 
 - never use color alone to express mode or error;
-- maintain readable contrast;
+- maintain readable contrast — the state palette in 11.2 is normative, and every value there clears WCAG AA against white text;
+- verify any new colored state against deuteranopia, protanopia, and full desaturation before adopting it;
 - keyboard operation must remain possible for the core workflow.
+
+Note that "no decorative animation" above does not conflict with the hazard stripe on the error state (11.2): that stripe is a static, non-color identifier, not decoration.
 
 ---
 
