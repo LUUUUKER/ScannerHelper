@@ -58,9 +58,24 @@ Not xUnit; verified by running the commands on macOS.
 
 | ID | Test | Assertion |
 |---|---|---|
-| A1 | `Core_assembly_references_no_wpf` | Referenced assemblies exclude `PresentationFramework`, `PresentationCore`, `WindowsBase` |
-| A2 | `Core_assembly_references_no_win32_project` | Referenced assemblies exclude `ScannerHelper.Win32` |
-| A3 | `Core_assembly_references_no_windows_desktop_runtime` | Referenced assemblies exclude `Microsoft.WindowsDesktop.App` |
+| A1 | `A1_Core_references_no_wpf_assemblies` | Referenced assemblies exclude `PresentationFramework`, `PresentationCore`, `WindowsBase`, `System.Windows.Forms` |
+| A2 | `A2_Core_references_no_win32_project` | Referenced assemblies exclude anything starting `ScannerHelper.Win32` |
+| A3 | `A3_Core_targets_no_specific_os_platform` | The Core assembly carries no `TargetPlatformAttribute` |
+
+**A3 was changed from the original plan.** It was specified as "referenced assemblies exclude `Microsoft.WindowsDesktop.App`", but that is a *framework* reference and never appears in `GetReferencedAssemblies()` — the test would have passed unconditionally and caught nothing. Checking for `TargetPlatformAttribute` watches the action actually worth preventing: retargeting Core to `net8.0-windows`, which makes the compiler emit that attribute.
+
+#### Verified guard behavior
+
+The guards were confirmed by deliberately introducing the violation:
+
+| Violation | Caught by | Outcome |
+|---|---|---|
+| Core retargeted to `net8.0-windows` | **NuGet, at build time** | `error NU1201: Project ScannerHelper.Core is not compatible with net8.0` — the build fails and the tests never run |
+| Core **and** Core.Tests both retargeted | **A3, at test time** | Build succeeds; A3 fails with `Detected platform: Windows7.0` |
+
+This is a two-layer defense, and the second layer is the one that matters. A developer who hits `NU1201` will find that retargeting the test project too is the quickest way to make the error disappear — at which point the build goes green and only A3 stands between that change and a `Core` that no longer compiles on macOS.
+
+`A1` has a known limitation, documented in the test file: `GetReferencedAssemblies()` reflects references actually *used*. A declared-but-unused reference is not written to assembly metadata, so `A1` cannot see it. Build check B3 covers the declaration side, and the guard turns red the moment such a reference is actually used. Walking the filesystem from a unit test to parse the `.csproj` would close the gap at the cost of environment fragility; that trade is not worth it here.
 
 ---
 
