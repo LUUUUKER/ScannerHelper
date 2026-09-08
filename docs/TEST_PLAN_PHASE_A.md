@@ -13,11 +13,13 @@ Test IDs are stable and map one-to-one onto test method names. Reference them in
 | Task | Area | Cases |
 |---|---|---|
 | 1 | Solution boundaries and layering guards | 6 (3 build checks + 3 tests) |
-| 2 | Domain types, mode, parsing, validation | 80 |
+| 2 | Domain types, mode, parsing, validation | 81 |
 | 3 | Settings model and JSON persistence | 28 |
-| | **Total** | **114** |
+| | **Total** | **115** |
 
-Task 2 breakdown: ModeManager 7, FixedPosition 16, Regex parser 11, Length 11, CharacterSet 13, Regex validator 7, Composite 9, result types 6.
+Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 11, Length 11, CharacterSet 13, Regex validator 7, Composite 9, result types 6.
+
+The count grows when implementation exposes a hole the plan missed — see F17. That is the plan working, not the plan failing.
 
 ---
 
@@ -115,6 +117,11 @@ Positions are 1-based (spec §8.1).
 | F14 | `  ABCDEF  ` | 1 | 3 | `  A` — leading whitespace is **not** trimmed (D-9) |
 | F15 | any valid config | — | — | Never throws for any non-null raw (D-1) |
 | F16 | `null` | 1 | 1 | Throws `ArgumentNullException` (D-1) |
+| F17 | `ABCDEF` | `int.MaxValue` | 10 | Failure `OutOfBounds` — the bounds check must not overflow |
+
+**F17 was added during implementation**, not planned. Writing the bounds check exposed the hole: the obvious form `startIndex + length > textLength` overflows to a negative number when the start position approaches `int.MaxValue`, so the check *passes*, and `Substring` then throws — violating F15 and the `ISkuParser` contract that no non-null input may throw. The correct form is `startIndex > textLength - length`, where neither side can overflow because `length >= 1` is guaranteed at construction and `textLength >= 0`.
+
+Verified by reverting to the naive form: F17 fails with `ArgumentOutOfRangeException: startIndex cannot be larger than length of string`. The overflow is real, not hypothetical.
 
 ### 4.3 `RegexSkuParser`
 
@@ -278,7 +285,7 @@ Deferred to Phase B, on Windows with real hardware. Do not simulate these with u
 
 ## 7. Summary
 
-114 cases across three tasks, all runnable on macOS with `dotnet test`.
+115 cases across three tasks, all runnable on macOS with `dotnet test`.
 
 Two of them do disproportionate work. **R8/V4** force parse and validation timeouts to carry a reason code distinct from a plain non-match, which is what makes an on-site rule problem diagnosable. **D5/D6** keep user-facing text out of `Core`, without which the Chinese UI cannot be correct and the defect stays hidden until localization begins.
 
