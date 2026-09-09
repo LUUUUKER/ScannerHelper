@@ -13,11 +13,11 @@ Test IDs are stable and map one-to-one onto test method names. Reference them in
 | Task | Area | Cases |
 |---|---|---|
 | 1 | Solution boundaries and layering guards | 6 (3 build checks + 3 tests) |
-| 2 | Domain types, mode, parsing, validation | 81 |
+| 2 | Domain types, mode, parsing, validation | 83 |
 | 3 | Settings model and JSON persistence | 28 |
-| | **Total** | **115** |
+| | **Total** | **117** |
 
-Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 11, Length 11, CharacterSet 13, Regex validator 7, Composite 9, result types 6.
+Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 11, CharacterSet 13, Regex validator 7, Composite 9, result types 6.
 
 The count grows when implementation exposes a hole the plan missed — see F17. That is the plan working, not the plan failing.
 
@@ -138,8 +138,27 @@ Verified by reverting to the naive form: F17 fails with `ArgumentOutOfRangeExcep
 | R9 | Constructed `Regex` | `MatchTimeout != Regex.InfiniteMatchTimeout` (spec §8.2) |
 | R10 | Pattern with several groups, index 2 requested | Returns the second group |
 | R11 | `null` raw | Throws `ArgumentNullException` (D-1) |
+| R12 | Negative capture group index | Config rejected at construction |
+| R13 | `""` raw | Failure `EmptyInput`, matching the fixed-position parser |
 
 > R8 and R9 carry the weight here. A timeout must be distinguishable from a non-match, otherwise on-site troubleshooting cannot tell "the rule is wrong" from "the rule is too slow".
+
+**R12 and R13 were added during implementation.**
+
+R12 closes the same class of gap as F9: the capture-group index is a numeric field in Settings, and a negative value is an ordinary typo. Left unchecked, the runtime behavior would depend on .NET internals and no definite reason code could be guaranteed.
+
+R13 makes both parsers report the same fault the same way. An empty scan means the scanner or capture path delivered nothing, which has no relation to the parsing rule. Letting the regex run against `""` would produce `NoMatch` and send the operator to inspect the rule when the fault is in hardware.
+
+**R5 and R6 are a deliberate trap for the implementation.** Both produce an empty captured value:
+
+| Case | Pattern | Input | `Group.Success` | Value | Expected |
+|---|---|---|---|---|---|
+| R6 | `(a*)` | `b` | `true` | `""` | **Success** (D-4) |
+| R5 | `(?:x)(a)?` | `x` | `false` | `""` | `MissingCaptureGroup` |
+
+An implementation that decides by testing whether the value is empty misreports R6 as a failure. `Group.Success` is the only correct discriminator.
+
+**R8 verified as genuine:** the test runs in exactly 100 ms — the configured timeout — confirming the regex ran until it was cut off rather than failing fast.
 
 ### 4.4 `LengthSkuValidator`
 
@@ -285,7 +304,7 @@ Deferred to Phase B, on Windows with real hardware. Do not simulate these with u
 
 ## 7. Summary
 
-115 cases across three tasks, all runnable on macOS with `dotnet test`.
+117 cases across three tasks, all runnable on macOS with `dotnet test`.
 
 Two of them do disproportionate work. **R8/V4** force parse and validation timeouts to carry a reason code distinct from a plain non-match, which is what makes an on-site rule problem diagnosable. **D5/D6** keep user-facing text out of `Core`, without which the Chinese UI cannot be correct and the defect stays hidden until localization begins.
 

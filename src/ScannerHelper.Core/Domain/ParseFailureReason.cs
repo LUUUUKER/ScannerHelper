@@ -52,4 +52,34 @@ public enum ParseFailureReason
     ///          format.
     /// </summary>
     OutOfBounds,
+
+    /// <summary>
+    /// 中文：正则完全没有匹配上。指向"规则与这个条码不符"——要么规则写错，
+    ///       要么扫到了不该扫的码。
+    /// English: The regex did not match at all. Means "the rule does not fit this
+    ///          code" — either the rule is wrong or the wrong item was scanned.
+    /// </summary>
+    NoMatch,
+
+    /// <summary>
+    /// 中文：正则匹配成功，但取不到配置指定的那个捕获组——索引超出实际组数，
+    ///       或该组本次未参与匹配。指向"捕获组索引这一项配错了"，与 NoMatch
+    ///       是不同的排查方向：整体是匹配上了的。
+    /// English: The regex matched, but the configured capture group is
+    ///          unavailable — the index exceeds the group count, or the group did
+    ///          not participate. Points at the capture-group index setting, not at
+    ///          the barcode: the pattern itself did match.
+    /// </summary>
+    MissingCaptureGroup,
+
+    /// <summary>
+    /// 中文：正则匹配超时被中断。指向"规则本身写法有问题、需要重写"——通常是
+    ///       嵌套量词导致的灾难性回溯。必须与 NoMatch 区分：那是改规则内容，
+    ///       这是改规则写法（规格 §8.2）。
+    /// English: The match timed out. Points at the pattern needing a rewrite —
+    ///          usually catastrophic backtracking from nested quantifiers. Must
+    ///          stay distinct from NoMatch: that one means change what the rule
+    ///          matches, this one means change how it is written (spec §8.2).
+    /// </summary>
+    RegexTimeout,
 }
