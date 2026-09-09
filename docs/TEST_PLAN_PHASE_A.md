@@ -269,6 +269,16 @@ C10 runs as two rows (toggle on and off), so this group executes 15 assertions a
 
 > D5 and D6 are easy to skip and expensive to retrofit. A literal `"SKU too short"` inside `Core` cannot be rendered in Chinese, and the defect stays invisible until localization work begins (spec §12).
 
+**These are meta-tests: they pass on arrival.** They encode structure the implementation already has, so passing proves nothing by itself — which is why each was verified by injecting the violation it exists to catch. Adding an `Sku` property to `ParseResult.Failure` and a `Message` property to `ValidationFailure.TooShort` turns D4, D5 and D6 red together.
+
+**D4 asserts less than originally intended, and the reason is worth recording.** The plan called for "the value of a failed result is unreachable at compile time". A unit test cannot verify that directly — one cannot write code that must fail to compile. What it can do is pin the structural preconditions: `Failure` has no `Sku`/`Value`/`Result` property, `Valid` has no `Failures` property, both base types' parameterless constructors are private, and all nine case types are `sealed`.
+
+Full closure is *not* asserted, because it is not true. C# generates a `protected` copy constructor for a non-sealed record and the language forbids declaring it `private`, so an outside assembly could derive a third case through it. The hole does not matter in practice — such code is obviously wrong and nothing outside inherits from `Core` — but a test must not assert something false.
+
+**D6's coverage is deliberately narrow.** Reflection cannot see string literals inside method bodies, so `return "The scan was empty"` is not caught. What is caught reliably is prose appearing in the *public API*: a `Message` property on a failure type, or a new `XxxMessages` class — the usual shape of "let me just put the text in Core".
+
+The alternative, scanning every IL string literal, was rejected for producing false positives: it would flag exception messages, regex patterns and configuration keys. This project's exception messages are deliberately long bilingual sentences aimed at developers rather than operators, and blocking those would be wrong. A test that cries wolf acquires exceptions, then gets ignored, then gets deleted. Narrow and reliable beats broad and noisy.
+
 ---
 
 ## 5. Task 3 — Settings and persistence
