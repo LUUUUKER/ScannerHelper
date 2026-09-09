@@ -80,4 +80,29 @@ public abstract record ValidationFailure
     /// 中文：配置要求的最大长度。 English: The configured maximum.
     /// </param>
     public sealed record TooLong(int ActualLength, int MaximumLength) : ValidationFailure;
+
+    /// <summary>
+    /// 中文：SKU 中含有配置的字符集不允许的字符。只报告遇到的第一个，
+    ///       因为单个校验器最多产生一条失败，而且定位一个位置已足够工人
+    ///       判断问题所在——罗列全部只会让错误界面变长。
+    /// English: The SKU contains a character the configured set does not allow.
+    ///          Only the first is reported: a single validator produces at most one
+    ///          failure, and one located position is enough for the operator —
+    ///          listing every offender would only lengthen the error screen.
+    /// </summary>
+    /// <param name="Character">
+    /// 中文：违规的字符。 English: The offending character.
+    /// </param>
+    /// <param name="Position">
+    /// 中文：违规字符的位置，**1-based**。与规格 §8.1 "面向用户的位置一律
+    ///       1-based" 保持一致——这个值唯一的用途就是显示给工人看，而人数
+    ///       字符是从 1 开始数的。字段名用 Position 而非 Index，正是为了
+    ///       避免被误读为 0-based。
+    /// English: The offending character's position, **1-based**, consistent with
+    ///          spec §8.1's "user-facing positions are 1-based". Its only purpose
+    ///          is to be read by a person, and people count from one. Named
+    ///          Position rather than Index precisely so it is not misread as
+    ///          0-based.
+    /// </param>
+    public sealed record IllegalCharacter(char Character, int Position) : ValidationFailure;
 }

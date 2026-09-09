@@ -13,11 +13,13 @@ Test IDs are stable and map one-to-one onto test method names. Reference them in
 | Task | Area | Cases |
 |---|---|---|
 | 1 | Solution boundaries and layering guards | 6 (3 build checks + 3 tests) |
-| 2 | Domain types, mode, parsing, validation | 84 |
+| 2 | Domain types, mode, parsing, validation | 86 |
 | 3 | Settings model and JSON persistence | 28 |
-| | **Total** | **118** |
+| | **Total** | **120** |
 
-Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 12, CharacterSet 13, Regex validator 7, Composite 9, result types 6.
+Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 12, CharacterSet 15, Regex validator 7, Composite 9, result types 6.
+
+Counts are xUnit executions, so a `[Theory]` row counts once. They are kept equal to what `dotnet test` reports, so the two can be compared directly.
 
 The count grows when implementation exposes a hole the plan missed — see F17. That is the plan working, not the plan failing.
 
@@ -200,6 +202,15 @@ An implementation that decides by testing whether the value is empty misreports 
 | C11 | any | any | `AB中` | Failure (non-ASCII) |
 | C12 | any | any | `""` | **Pass** (D-5) |
 | C13 | not enabled | — | anything | Pass |
+| C14 | any | any | `null` | Throws `ArgumentNullException` (D-1) |
+
+C10 runs as two rows (toggle on and off), so this group executes 15 assertions across 14 case IDs.
+
+**`IllegalCharacter` reports a 1-based `Position`, not a 0-based `Index`.** The plan originally said "`A` at index 2" for `12A45`; the implementation reports position 3. This value exists solely to be read by an operator, and people count characters from one — spec §8.1 already fixes user-facing positions as 1-based for the fixed-position parser, and one product should not carry two conventions. The field is named `Position` rather than `Index` precisely so it is not misread.
+
+**ASCII-only is the load-bearing implementation detail.** `char.IsLetter('中')` and `char.IsDigit('٣')` both return `true`, so the obvious implementation admits non-ASCII characters. C11 exists to forbid this. Verified by swapping in `char.IsLetter`: C11 fails, `"AB中"` passing "letters only". Beyond the test, a non-ASCII character in an SKU usually signals that keyboard-layout decoding went wrong — precisely the fault most worth catching, never one to accept quietly.
+
+**C3/C4 and C10a/C10b cage the ignore-case toggle from both sides.** C3 vs C4 proves it does something: identical input `abc` passes with the toggle on and fails with it off. C10a vs C10b proves it does not do too much: the same digits pass identically either way. V5 in the next group closes the third side by proving the toggle never reaches the validation regex.
 
 ### 4.6 `RegexSkuValidator`
 
@@ -311,7 +322,7 @@ Deferred to Phase B, on Windows with real hardware. Do not simulate these with u
 
 ## 7. Summary
 
-118 cases across three tasks, all runnable on macOS with `dotnet test`.
+120 cases across three tasks, all runnable on macOS with `dotnet test`.
 
 Two of them do disproportionate work. **R8/V4** force parse and validation timeouts to carry a reason code distinct from a plain non-match, which is what makes an on-site rule problem diagnosable. **D5/D6** keep user-facing text out of `Core`, without which the Chinese UI cannot be correct and the defect stays hidden until localization begins.
 
