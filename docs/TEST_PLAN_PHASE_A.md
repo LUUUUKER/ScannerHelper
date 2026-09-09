@@ -21,6 +21,8 @@ Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 12, C
 
 Counts are xUnit executions, so a `[Theory]` row counts once. They are kept equal to what `dotnet test` reports, so the two can be compared directly.
 
+One exception: Task 3's defaults, S1–S10, are asserted inside a single test method, since they describe one object's initial state and splitting them would produce ten near-identical methods. So Task 3's 28 case IDs correspond to fewer executions. Where ID count and execution count diverge, the section says so.
+
 The count grows when implementation exposes a hole the plan missed — see F17. That is the plan working, not the plan failing.
 
 ---
@@ -305,6 +307,16 @@ The alternative, scanning every IL string literal, was rejected for producing fa
 | S11 | `AppSettings` exposes no scan-mode property | Reflection assertion — impossible by construction (spec §14) |
 | S12 | `AppSettings` exposes no paused-state property | Reflection assertion (spec §5.7) |
 | S13 | Serialized JSON text | Contains no `mode` or `paused` key in any casing |
+
+S1–S13 run as **5 executions**: S1–S7, S9 and S10 are asserted together in one method describing the default object's state.
+
+**The name checks must be precise, not substring matches.** `ModeSwitchSoundEnabled` is a perfectly legitimate setting whose name contains "Mode", and the JSON key `modeSwitchSoundEnabled` contains "mode". A substring search would fire immediately and then either acquire an exception — the first exception is where a guard starts rotting — or force a well-named field to be renamed. S11 therefore checks two precise criteria: whether a property is *typed* `ScanMode` (the most reliable signal, since storing the mode would naturally use that type) and whether its name is one of a specific list. S13 parses the JSON and compares whole property names rather than searching the text.
+
+**S13 does not duplicate S11/S12.** Those inspect the shape of the C# types; S13 inspects what is actually written to disk. The two can disagree — a property annotated `[JsonPropertyName("currentMode")]` slips past a type check and is caught here.
+
+**Three independent layers defend "the mode is never persisted"**: M7 (ModeManager takes no persistence dependency), S11/S12 (no such field exists), S13 (no such key is written). Verified by adding `CurrentMode` and `IsPaused` to `AppSettings`: S11, S12 and S13 fail together. Any one layer failing leaves two.
+
+The settings-type collector walks from `AppSettings` into any property type in the same namespace, so a newly added nested settings type is covered automatically. A hand-maintained list of types to scan would eventually go stale, and would do so silently.
 
 ### 5.3 Load and save
 
