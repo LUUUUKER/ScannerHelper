@@ -13,11 +13,11 @@ Test IDs are stable and map one-to-one onto test method names. Reference them in
 | Task | Area | Cases |
 |---|---|---|
 | 1 | Solution boundaries and layering guards | 6 (3 build checks + 3 tests) |
-| 2 | Domain types, mode, parsing, validation | 83 |
+| 2 | Domain types, mode, parsing, validation | 84 |
 | 3 | Settings model and JSON persistence | 28 |
-| | **Total** | **117** |
+| | **Total** | **118** |
 
-Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 11, CharacterSet 13, Regex validator 7, Composite 9, result types 6.
+Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 12, CharacterSet 13, Regex validator 7, Composite 9, result types 6.
 
 The count grows when implementation exposes a hole the plan missed — see F17. That is the plan working, not the plan failing.
 
@@ -175,6 +175,13 @@ An implementation that decides by testing whether the value is empty misreports 
 | L9 | max only | `""` | Pass |
 | L10 | min=9, max=8 | — | Config rejected |
 | L11 | min=-1 | — | Config rejected |
+| L12 | any | `null` | Throws `ArgumentNullException` (D-1) |
+
+**L12 was added during implementation**, so that every public string-taking entry point in `Core` treats `null` identically — matching F16 and R11. Callers should not have to remember which entry points throw and which return a failure.
+
+`L10` is the case worth understanding: a minimum above the maximum describes a range no length can satisfy. Allowed through to runtime it presents on site as "every scan fails validation", giving the operator no way to tell a contradictory rule from a bad barcode. Per D-2 it is rejected at construction.
+
+`L8` and `L9` are the two directions of "not enabled means not constrained". The tempting wrong implementation substitutes defaults for the disabled bound — 0 for the minimum, `int.MaxValue` for the maximum. That looks equivalent but destroys information: the configuration can then no longer distinguish "the user set the minimum to 0" from "the user never enabled a minimum", which are different states in the Settings UI and cannot be restored from JSON. `int?` keeps "not enabled" expressible, persistable, and restorable.
 
 ### 4.5 `CharacterSetSkuValidator`
 
@@ -304,7 +311,7 @@ Deferred to Phase B, on Windows with real hardware. Do not simulate these with u
 
 ## 7. Summary
 
-117 cases across three tasks, all runnable on macOS with `dotnet test`.
+118 cases across three tasks, all runnable on macOS with `dotnet test`.
 
 Two of them do disproportionate work. **R8/V4** force parse and validation timeouts to carry a reason code distinct from a plain non-match, which is what makes an on-site rule problem diagnosable. **D5/D6** keep user-facing text out of `Core`, without which the Chinese UI cannot be correct and the defect stays hidden until localization begins.
 
