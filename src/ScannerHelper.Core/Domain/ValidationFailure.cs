@@ -105,4 +105,37 @@ public abstract record ValidationFailure
     ///          0-based.
     /// </param>
     public sealed record IllegalCharacter(char Character, int Position) : ValidationFailure;
+
+    /// <summary>
+    /// 中文：SKU 不符合配置的校验正则。指向"规则内容与这个 SKU 不符"——
+    ///       要么规则该改，要么解析出来的这段本就不对。
+    /// English: The SKU does not match the configured validation regex. Points at
+    ///          "the rule's content does not fit this SKU" — either the rule needs
+    ///          changing, or what was parsed out is genuinely wrong.
+    /// </summary>
+    /// <param name="Pattern">
+    /// 中文：当时生效的校验正则。携带它是为了让诊断日志能自解释——光记一条
+    ///       "校验失败" 无法还原当时用的是哪条规则，而规则可能在事后被改过
+    ///       （规格 §15）。
+    /// English: The pattern in force at the time. Carried so the diagnostic log is
+    ///          self-describing: a bare "validation failed" cannot reconstruct
+    ///          which rule applied, and the rule may have been edited since
+    ///          (spec §15).
+    /// </param>
+    public sealed record PatternMismatch(string Pattern) : ValidationFailure;
+
+    /// <summary>
+    /// 中文：校验正则匹配超时被中断。指向"规则写法有问题、需要重写"——
+    ///       通常是嵌套量词导致的灾难性回溯。必须与 <see cref="PatternMismatch"/>
+    ///       区分：那是改规则内容，这是改规则写法（规格 §9.3、§19）。
+    /// English: The validation regex timed out — usually catastrophic backtracking
+    ///          from nested quantifiers. Must stay distinct from
+    ///          <see cref="PatternMismatch"/>: that one means change what the rule
+    ///          matches, this one means change how it is written (spec §9.3, §19).
+    /// </summary>
+    /// <param name="Pattern">
+    /// 中文：超时的那条校验正则，供排查时直接定位。
+    /// English: The pattern that timed out, so troubleshooting can locate it.
+    /// </param>
+    public sealed record RegexTimeout(string Pattern) : ValidationFailure;
 }

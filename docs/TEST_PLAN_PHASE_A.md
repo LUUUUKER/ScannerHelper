@@ -13,11 +13,11 @@ Test IDs are stable and map one-to-one onto test method names. Reference them in
 | Task | Area | Cases |
 |---|---|---|
 | 1 | Solution boundaries and layering guards | 6 (3 build checks + 3 tests) |
-| 2 | Domain types, mode, parsing, validation | 86 |
+| 2 | Domain types, mode, parsing, validation | 88 |
 | 3 | Settings model and JSON persistence | 28 |
-| | **Total** | **120** |
+| | **Total** | **122** |
 
-Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 12, CharacterSet 15, Regex validator 7, Composite 9, result types 6.
+Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 12, CharacterSet 15, Regex validator 9, Composite 9, result types 6.
 
 Counts are xUnit executions, so a `[Theory]` row counts once. They are kept equal to what `dotnet test` reports, so the two can be compared directly.
 
@@ -223,6 +223,14 @@ C10 runs as two rows (toggle on and off), so this group executes 15 assertions a
 | V5 | **`IgnoreCase = true`, `^[A-Z]+$` against `abc`** | **Still fails** — proves the toggle is confined to character-set validation (spec §9.2) |
 | V6 | Parsing regex and validation regex configured separately | Changing one does not affect the other |
 | V7 | Constructed `Regex` | `MatchTimeout != Regex.InfiniteMatchTimeout` (spec §9.3) |
+| V8 | `null` sku | Throws `ArgumentNullException` (D-1) |
+| V9 | `null` pattern | Not enabled; everything passes, matching L7 and C13 |
+
+**V5 closes the ignore-case cage.** Three tests bound the toggle's scope from three sides: C3 vs C4 proves it does something, C10a vs C10b proves it does not touch digits, and V5 proves it cannot reach the validation regex. Verified by adding `RegexOptions.IgnoreCase` to the validator: V5 fails with the message written for exactly that reader.
+
+`RegexSkuValidator` therefore accepts **no** case parameter at all. Spec §9.2's toggle governs character-set validation only; wiring it in here would let one checkbox change the meaning of two unrelated rules, leaving the operator unable to predict how much shifted when they ticked it. A rule author wanting case-insensitive matching writes `(?i)^[a-z]+$` — visible in the rule and reviewable.
+
+**Empty string is handled differently here than in C12, deliberately.** The character-set validator passes `""` because "must not be empty" belongs to the length rule. The validation regex applies no special case at all: `^\d+$` rejects `""` and `^\d*$` accepts it, which is the rule author's decision and not the validator's to override.
 
 ### 4.7 `CompositeSkuValidator`
 
@@ -322,7 +330,7 @@ Deferred to Phase B, on Windows with real hardware. Do not simulate these with u
 
 ## 7. Summary
 
-120 cases across three tasks, all runnable on macOS with `dotnet test`.
+122 cases across three tasks, all runnable on macOS with `dotnet test`.
 
 Two of them do disproportionate work. **R8/V4** force parse and validation timeouts to carry a reason code distinct from a plain non-match, which is what makes an on-site rule problem diagnosable. **D5/D6** keep user-facing text out of `Core`, without which the Chinese UI cannot be correct and the defect stays hidden until localization begins.
 
