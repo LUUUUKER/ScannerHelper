@@ -13,11 +13,11 @@ Test IDs are stable and map one-to-one onto test method names. Reference them in
 | Task | Area | Cases |
 |---|---|---|
 | 1 | Solution boundaries and layering guards | 6 (3 build checks + 3 tests) |
-| 2 | Domain types, mode, parsing, validation | 88 |
+| 2 | Domain types, mode, parsing, validation | 90 |
 | 3 | Settings model and JSON persistence | 28 |
-| | **Total** | **122** |
+| | **Total** | **124** |
 
-Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 12, CharacterSet 15, Regex validator 9, Composite 9, result types 6.
+Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 12, CharacterSet 15, Regex validator 9, Composite 11, result types 6.
 
 Counts are xUnit executions, so a `[Theory]` row counts once. They are kept equal to what `dotnet test` reports, so the two can be compared directly.
 
@@ -245,6 +245,16 @@ C10 runs as two rows (toggle on and off), so this group executes 15 assertions a
 | P7 | Both fail | Invalid, carrying **both** reasons (D-6) |
 | P8 | Validator order swapped | Same result |
 | P9 | All three validator types enabled and passing | Valid |
+| P10 | `null` sku | Throws `ArgumentNullException` (D-1) |
+| P11 | `null` validator collection | Rejected at construction |
+
+**P7 is decision D-6 in executable form**, and P8 turned out to guard the same property independently. Verified by adding a `break` after the first failure: **both** fail. P7 sees only one failure where two were expected; P8 sees the forward and reversed orderings report *different* failures, because a short-circuiting composite reports whichever validator happens to run first. Two tests, two angles, one property.
+
+**P1 (empty) and P11 (null) are deliberately different.** An empty collection means "no validation rule is enabled" — a common configuration spec §9 explicitly supports, since many sites need parsing only. `null` can only be a caller defect. The same distinction the parsers draw between `""` and `null` (D-1).
+
+**P5 and P6 are both required.** P5 alone cannot rule out an implementation that consults only the first validator; P6 alone cannot rule out one that consults only the last.
+
+**Stubs, not real validators.** Every test here except P9 uses a stub validator whose result is preset. What is under test is the combining logic — how many failures, how they merge, whether order matters — not the length or character-set rules. Real validators would mix "why did this one fail" into the subject under test, and a change to any base validator would turn this file inexplicably red. P9 is the exception, confirming the three real types do assemble together — an interface-conformance surface that stubbing cannot cover.
 
 ### 4.8 `ParseResult` / `ValidationResult`
 
@@ -330,7 +340,7 @@ Deferred to Phase B, on Windows with real hardware. Do not simulate these with u
 
 ## 7. Summary
 
-122 cases across three tasks, all runnable on macOS with `dotnet test`.
+124 cases across three tasks, all runnable on macOS with `dotnet test`.
 
 Two of them do disproportionate work. **R8/V4** force parse and validation timeouts to carry a reason code distinct from a plain non-match, which is what makes an on-site rule problem diagnosable. **D5/D6** keep user-facing text out of `Core`, without which the Chinese UI cannot be correct and the defect stays hidden until localization begins.
 
