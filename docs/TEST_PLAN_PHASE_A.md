@@ -14,8 +14,8 @@ Test IDs are stable and map one-to-one onto test method names. Reference them in
 |---|---|---|
 | 1 | Solution boundaries and layering guards | 6 (3 build checks + 3 tests) |
 | 2 | Domain types, mode, parsing, validation | 90 |
-| 3 | Settings model and JSON persistence | 28 |
-| | **Total** | **124** |
+| 3 | Settings model and JSON persistence | 20 (28 case IDs) |
+| | **Total** | **113** |
 
 Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 12, CharacterSet 15, Regex validator 9, Composite 11, result types 6.
 
@@ -343,6 +343,20 @@ The settings-type collector walks from `AppSettings` into any property type in t
 | S27 | Unknown extra fields written by a future version | Ignored without error |
 | S28 | `SchemaVersion` newer than the application | Treated as corruption per D-8 |
 
+S14–S28 run as **15 executions** across 11 methods, S21–S24 and S28 sharing one `[Theory]`.
+
+**S18 was too weak when first written, and passing did not reveal it.** The fake file system threw immediately on write, so no bytes reached disk — and with nothing written, even a non-atomic implementation writing straight to the target left the original intact. The test passed because the fake was gentle, not because the implementation was correct.
+
+Confirmed by switching `Save` to a non-atomic write: the suite stayed **fully green**. The fake now writes half the content before throwing, which is what a full disk, a power loss or a killed process actually does. With that fix the same experiment turns **S18 and S19 both red**, and the atomic implementation restores them to green. The test now discriminates; before, it only looked like it did.
+
+This is the argument for verifying every guard by injecting the violation it exists to catch. A guard that has never failed is not known to work — and here the guard was genuinely broken while showing green.
+
+**Load and Save take opposite stances on failure, deliberately.** `Load` never throws and falls back to defaults, because an operator facing an application that will not open has no recourse, whereas defaults at least leave SN mode working. `Save` must throw, because a swallowed write failure leaves the operator believing their settings were saved until the next launch proves otherwise, with no way left to tell which step failed.
+
+**S27 and S28 are not in conflict.** S28 rejects a file whose *declared version* is higher — an explicit "this is a newer format" signal. S27 handles a file at the same version that merely carries extra fields, an in-version extension with no reason to discard the whole configuration. Treating unknown fields as corruption would wipe every station's settings on every release.
+
+**Corrupt files are renamed, never overwritten or deleted.** The parsing rule and scanner binding are configured remotely by the technical advisor and cannot be restored by the operator; destroying them because a file broke would be the worst possible response. S25 additionally pins that a second corruption does not overwrite the first backup, since the earliest copy is the last complete configuration before things went wrong.
+
 ---
 
 ## 6. Out of scope for Phase A
@@ -362,7 +376,7 @@ Deferred to Phase B, on Windows with real hardware. Do not simulate these with u
 
 ## 7. Summary
 
-124 cases across three tasks, all runnable on macOS with `dotnet test`.
+113 xUnit executions across three tasks, all green on macOS. Phase A is complete.
 
 Two of them do disproportionate work. **R8/V4** force parse and validation timeouts to carry a reason code distinct from a plain non-match, which is what makes an on-site rule problem diagnosable. **D5/D6** keep user-facing text out of `Core`, without which the Chinese UI cannot be correct and the defect stays hidden until localization begins.
 
