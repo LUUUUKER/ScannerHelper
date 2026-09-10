@@ -61,6 +61,14 @@ public class ScanInputCoordinatorTests
     private readonly ModeManager _modeManager = new();
 
     private readonly RecordingKeyboardOutputService _output = new();
+
+    /// <summary>
+    /// 中文：默认绑定 F8 / F10 / Esc，暂停热键未分配——与规格 §13.3 的出厂配置一致。
+    /// English: F8 / F10 / Esc bound and pause unassigned, matching spec §13.3's shipped defaults.
+    /// </summary>
+    private readonly HotkeyCoordinator _hotkeys = new(
+        new HotkeyBindings(ToggleMode: 0x77, ForceSend: 0x79, Cancel: 0x1B));
+
     private readonly List<ScanOutcome> _outcomes = [];
     private readonly List<KeyEvent> _replayed = [];
 
@@ -78,7 +86,8 @@ public class ScanInputCoordinatorTests
                 RuleType = SkuParsingRuleType.FixedPosition, StartPosition = 5, Length = 8,
             }),
             validator ?? SkuValidatorFactory.Create(new SkuValidationSettings()),
-            _output);
+            _output,
+            _hotkeys);
 
         coordinator.ScanProcessed += (_, args) => _outcomes.Add(args.Outcome);
         coordinator.ReplayRequested += (_, args) => _replayed.Add(args.KeyEvent);
@@ -527,19 +536,19 @@ public class ScanInputCoordinatorTests
         var validator = SkuValidatorFactory.Create(new SkuValidationSettings());
 
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            null!, session, _modeManager, parser, validator, _output));
+            null!, session, _modeManager, parser, validator, _output, _hotkeys));
 
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            correlator, null!, _modeManager, parser, validator, _output));
+            correlator, null!, _modeManager, parser, validator, _output, _hotkeys));
 
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            correlator, session, null!, parser, validator, _output));
+            correlator, session, null!, parser, validator, _output, _hotkeys));
 
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            correlator, session, _modeManager, null!, validator, _output));
+            correlator, session, _modeManager, null!, validator, _output, _hotkeys));
 
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            correlator, session, _modeManager, parser, null!, _output));
+            correlator, session, _modeManager, parser, null!, _output, _hotkeys));
 
         // 输出服务同样必填。缺了它，一枪扫完之后没有任何东西能到达业务软件，
         // 而界面照样报告成功——规格 §19.1 说的正是这种"看起来在工作"的失效。
@@ -547,7 +556,146 @@ public class ScanInputCoordinatorTests
         // application after a scan while the UI still reports success — spec §19.1's
         // "looks like it is working" failure exactly.
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            correlator, session, _modeManager, parser, validator, null!));
+            correlator, session, _modeManager, parser, validator, null!, _hotkeys));
+
+        // 热键路由同样必填。缺了它，F8 会像普通按键一样被重放给业务软件，
+        // 工人按下去毫无反应——而现场只会看到"模式切不了"，无从判断是热键
+        // 没注册、键盘坏了，还是程序没在跑。
+        // Hotkey routing is required too. Without it F8 is replayed to the business
+        // application like any other key and does nothing, and all the site sees is "the mode
+        // will not switch" — with no way to tell an unregistered hotkey from a broken keyboard
+        // or a program that is not running.
+        Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
+            correlator, session, _modeManager, parser, validator, _output, null!));
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   CO16 —— 来自普通键盘的 F8 确实切换了模式，而且**没有被重放**。
+    ///
+    ///   这条测的是接缝：热键路由表本身由 HotkeyCoordinatorTests 逐行钉住，
+    ///   本条验证协调器真的把它接上了。一张没人调用的路由表是死代码，
+    ///   而"规则写对了但没接上"在单元测试里两边都是绿的。
+    ///
+    ///   不重放这一点同样要断言：规格 §7 要求处理过的热键被消费掉、不转发，
+    ///   否则一次模式切换会同时在网页里触发一个不相干的快捷键。
+    /// English:
+    ///   CO16 — F8 from a normal keyboard really does toggle the mode, and is not replayed.
+    ///
+    ///   This tests the seam. The routing table itself is pinned row by row by
+    ///   HotkeyCoordinatorTests; this verifies the coordinator actually consults it. A routing
+    ///   table nobody calls is dead code, and "the rules are right but nothing calls them" leaves
+    ///   both sides green in unit tests.
+    ///
+    ///   The absence of a replay is asserted too: spec §7 requires an acted-upon hotkey to be
+    ///   consumed rather than forwarded, or one mode switch would simultaneously trigger an
+    ///   unrelated shortcut in the web application.
+    /// </summary>
+    [Fact]
+    public void F8_from_a_keyboard_toggles_the_mode_and_is_not_replayed()
+    {
+        var coordinator = CreateCoordinator();
+        Assert.Equal(ScanMode.Sn, _modeManager.CurrentMode);
+
+        const ushort scanCodeF8 = 0x42;
+        var f8 = HookEvent(character: null, scanCodeF8) with { VirtualKey = 0x77 };
+
+        Assert.Equal(HookAction.Swallow, coordinator.OnHookEvent(f8));
+
+        _clock.Advance(TimeSpan.FromMilliseconds(1));
+        coordinator.OnRawInputEvent(RawEvent(scanCodeF8, KeyboardDeviceId));
+
+        Assert.Equal(ScanMode.Sku, _modeManager.CurrentMode);
+        Assert.True(_replayed.Count == 0,
+            "处理过的热键必须被消费掉、不转发（规格 §7），否则一次模式切换会同时"
+            + "在网页里触发一个不相干的快捷键。");
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   CO17 —— 来自绑定扫码枪的 F8 **不**切换模式，而是当作扫描数据（规格 §7）。
+    ///
+    ///   条码内容里出现能被解成 F8 的字节完全可能。一旦扫码枪能切模式，现场
+    ///   会出现这样的场景：工人扫了一枪含 F8 的条码，模式被悄悄切走，接下来
+    ///   几十枪全部以错误的模式发出去——而他正低头看货。
+    /// English:
+    ///   CO17 — F8 from the bound scanner does not toggle the mode and is treated as scan data
+    ///   (spec §7). A barcode can contain bytes decoding to F8, and a scanner able to switch
+    ///   modes produces this scene: one such scan silently changes the mode and the next few
+    ///   dozen go out wrong, while the operator is looking at goods.
+    /// </summary>
+    [Fact]
+    public void F8_from_the_bound_scanner_does_not_toggle_the_mode()
+    {
+        var coordinator = CreateCoordinator();
+
+        const ushort scanCodeF8 = 0x42;
+        var f8 = HookEvent(character: null, scanCodeF8) with { VirtualKey = 0x77 };
+
+        coordinator.OnHookEvent(f8);
+        _clock.Advance(TimeSpan.FromMilliseconds(1));
+        coordinator.OnRawInputEvent(RawEvent(scanCodeF8, ScannerDeviceId));
+
+        Assert.True(_modeManager.CurrentMode == ScanMode.Sn,
+            "扫码枪发出的 F8 永远是扫描数据，绝不是模式命令（规格 §7）。");
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   CO18 —— 来源**没能判定**的 F8 不得切换模式，只被重放。
+    ///
+    ///   ★ 这是本文件里最微妙的一条取舍，值得说清楚。
+    ///
+    ///     一个等不到 Raw Input 对家的事件，按决策 D-13 会被当作普通键盘输入
+    ///     重放出去——那个方向是对的：泄漏一个扫码字符看得见、能改，吞掉一次
+    ///     按键则是隐形的。
+    ///
+    ///     但"按普通键盘重放"**不等于**"可以当热键用"。两个方向的后果差得远：
+    ///       误重放一个扫码枪字符 → 业务软件里多一个字符，工人看得见。
+    ///       误切换模式           → 接下来几十枪全部以错误的模式发出去，
+    ///                              毫无提示，而这正是规格 §19.1 说的静默错误数据。
+    ///
+    ///     所以规格 §7「扫码枪发出的 F8 绝不能切换模式」这条，对"不知道是不是
+    ///     扫码枪"应当与"知道是扫码枪"同等对待。判不出来的时候，宁可少切一次
+    ///     模式（工人再按一下就是了），也不能多切一次。
+    /// English:
+    ///   CO18 — an F8 whose source could not be determined must not toggle the mode; it is only
+    ///   replayed.
+    ///
+    ///   The subtlest trade in this file. An event whose Raw Input counterpart never arrived is
+    ///   replayed as ordinary keyboard input under decision D-13, and that direction is right: a
+    ///   leaked scanner character is visible and correctable while a swallowed keystroke is not.
+    ///
+    ///   But "replay as keyboard input" does not mean "may act as a hotkey". The consequences
+    ///   diverge sharply: wrongly replaying a scanner character adds one visible character to the
+    ///   business application, whereas wrongly toggling the mode sends the next few dozen scans
+    ///   out in the wrong mode with no indication — spec §19.1's silently wrong data.
+    ///
+    ///   Spec §7's "scanner F8 must never toggle" therefore deserves to treat "we do not know
+    ///   whether it was the scanner" exactly as it treats "we know it was". When in doubt, miss a
+    ///   mode switch — the operator simply presses again — rather than make an extra one.
+    /// </summary>
+    [Fact]
+    public void Unresolved_f8_is_replayed_but_never_toggles_the_mode()
+    {
+        var coordinator = CreateCoordinator();
+
+        const ushort scanCodeF8 = 0x42;
+        var f8 = HookEvent(character: null, scanCodeF8) with { VirtualKey = 0x77 };
+
+        Assert.Equal(HookAction.Swallow, coordinator.OnHookEvent(f8));
+
+        // Raw Input 始终不来，事件按关联窗口超时被结掉（决策 D-13）
+        // Raw Input never arrives and the event is settled by the correlation window (D-13)
+        _clock.Advance(TimeSpan.FromMilliseconds(100));
+        coordinator.Tick();
+
+        Assert.True(_modeManager.CurrentMode == ScanMode.Sn,
+            "来源没能判定的按键不得当作热键。误切一次模式会让接下来几十枪"
+            + "全部以错误的模式发出去，而且毫无提示（规格 §19.1）。");
+
+        Assert.True(_replayed.Count == 1,
+            "它仍然必须被重放——绝不无限期吞掉普通键盘输入（规格 §19、决策 D-13）。");
     }
 
     /// <summary>

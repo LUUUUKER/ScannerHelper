@@ -176,6 +176,7 @@ public sealed class ScanInputCoordinator
     private readonly ScanSession _session;
     private readonly ModeManager _modeManager;
     private readonly IKeyboardOutputService _output;
+    private readonly HotkeyCoordinator _hotkeys;
 
     /// <summary>
     /// 中文：
@@ -207,7 +208,8 @@ public sealed class ScanInputCoordinator
         ModeManager modeManager,
         ISkuParser skuParser,
         ISkuValidator skuValidator,
-        IKeyboardOutputService output)
+        IKeyboardOutputService output,
+        HotkeyCoordinator hotkeys)
     {
         ArgumentNullException.ThrowIfNull(correlator);
         ArgumentNullException.ThrowIfNull(session);
@@ -215,11 +217,13 @@ public sealed class ScanInputCoordinator
         ArgumentNullException.ThrowIfNull(skuParser);
         ArgumentNullException.ThrowIfNull(skuValidator);
         ArgumentNullException.ThrowIfNull(output);
+        ArgumentNullException.ThrowIfNull(hotkeys);
 
         _correlator = correlator;
         _session = session;
         _modeManager = modeManager;
         _output = output;
+        _hotkeys = hotkeys;
         SkuParser = skuParser;
         SkuValidator = skuValidator;
     }
@@ -342,7 +346,14 @@ public sealed class ScanInputCoordinator
         switch (outcome.Decision)
         {
             case CorrelationDecision.PassThrough:
-                return HookAction.PassThrough;
+                // 来源已确知不是扫码枪，此刻就能判断它是不是热键。
+                // 是热键就吞掉（规格 §7：处理过的热键不转发），否则放行。
+                // The source is already known not to be the scanner, so whether it is a hotkey
+                // can be decided now: swallow if it is (spec §7 does not forward an acted-upon
+                // hotkey), otherwise pass through.
+                return RouteHotkey(keyEvent, isFromBoundScanner: false) == HotkeyAction.None
+                    ? HookAction.PassThrough
+                    : HookAction.Swallow;
 
             case CorrelationDecision.Swallow:
                 FeedSession(keyEvent);
@@ -450,6 +461,11 @@ public sealed class ScanInputCoordinator
     ///
     ///   ★ 暂停**不改变当前模式**（规格 §5.7：暂停与 SN/SKU 正交）。
     ///     本方法完全不碰 ModeManager，恢复时模式自然还是原来那个。
+    ///
+    ///     被放出去的那些按键也不会改变模式，即便其中恰好有一个 F8。
+    ///     Flush 结掉的事件来源都没能判定（DeviceId 为 null），而 DispatchResolved
+    ///     只对来源确知的事件做热键路由——理由见那里的说明。于是"点一下暂停，
+    ///     模式跟着变了"这种意外不可能发生，而这正是规格 §5.7 要求的正交性。
     /// English:
     ///   Enters PAUSED (spec §5.7).
     ///   Steps: (1) release every keystroke the correlator is withholding; (2) discard the
@@ -463,6 +479,12 @@ public sealed class ScanInputCoordinator
     ///
     ///   Pausing does not change the mode (spec §5.7: PAUSED is orthogonal to SN/SKU). This
     ///   method never touches ModeManager, so resuming naturally restores what was in force.
+    ///
+    ///   Nor can the released keystrokes change it, even if one of them happens to be F8: every
+    ///   event Flush settles has an undetermined source (a null DeviceId), and DispatchResolved
+    ///   routes hotkeys only for events whose source is known — see the reasoning there. "Click
+    ///   pause and the mode changes with it" is therefore impossible, which is the orthogonality
+    ///   spec §5.7 requires.
     /// </summary>
     public void Pause()
     {
@@ -686,8 +708,87 @@ public sealed class ScanInputCoordinator
                 continue;
             }
 
+            // ★ 只有来源**确实判定出来**的事件才允许被当作热键。
+            //
+            //   DeviceId 为 null 表示这个事件是按超时规则结掉的（决策 D-13）——
+            //   对应的 Raw Input 始终没来，我们并不知道是谁按的，只是按"宁可
+            //   重放也不吞掉"的原则放行。
+            //
+            //   这种事件绝不能触发热键，两个方向的后果完全不对称：
+            //     误重放一个扫码枪字符 → 业务软件里多一个字符，看得见、能改。
+            //     误切换模式           → 接下来几十枪全部以错误的模式发出去，
+            //                            而工人正低头看货，毫无提示。
+            //   后者正是规格 §7「扫码枪发出的 F8 绝不能切换模式」要防的东西，
+            //   而"不知道是不是扫码枪"与"知道是扫码枪"在这条规则面前应当同等对待。
+            //
+            // Only events whose source was actually determined may act as a hotkey.
+            //
+            // A null DeviceId means the event was settled by the expiry rule (decision D-13):
+            // its Raw Input counterpart never arrived, we do not know who pressed it, and it is
+            // released only under "replay rather than swallow".
+            //
+            // Such an event must never fire a hotkey, the two directions being entirely
+            // asymmetric: wrongly replaying a scanner character puts one visible, correctable
+            // character into the business application, whereas wrongly toggling the mode sends
+            // the next few dozen scans out in the wrong mode with no indication at all, while
+            // the operator is looking at goods. The latter is exactly what spec §7's "scanner
+            // F8 must never toggle" exists to prevent — and "we do not know whether it was the
+            // scanner" deserves the same treatment as "we know it was".
+            if (resolution.DeviceId is not null
+                && RouteHotkey(resolution.Event, isFromBoundScanner: false) != HotkeyAction.None)
+            {
+                continue;
+            }
+
             ReplayRequested?.Invoke(this, new ReplayRequestedEventArgs(resolution.Event));
         }
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   判断一次按键是不是热键，是就当场执行对应的动作。
+    ///   输入：keyEvent 按键；isFromBoundScanner 是否来自绑定的扫码枪。
+    ///   输出：执行的动作。不是 None 就意味着这个按键被消费掉了，
+    ///         不应再转发或重放（规格 §7）。
+    ///
+    ///   PauseResume 在这里只可能意味着"暂停"。规格 §5.7 规定暂停期间不拦截
+    ///   任何热键，所以这个键在已暂停状态下根本走不到这里——它只能单向。
+    ///   恢复必须靠鼠标点界面上的按钮，详见 HotkeyAction.PauseResume。
+    /// English:
+    ///   Decides whether a keystroke is a hotkey and performs its action if so, returning what
+    ///   was done. Anything other than None means the key was consumed and must not be forwarded
+    ///   or replayed (spec §7).
+    ///
+    ///   PauseResume can only ever mean "pause" here. Spec §5.7 intercepts no hotkey while
+    ///   paused, so this key cannot reach here in the paused state — it is one-way, and resuming
+    ///   requires the mouse-clickable control. See HotkeyAction.PauseResume.
+    /// </summary>
+    private HotkeyAction RouteHotkey(in KeyEvent keyEvent, bool isFromBoundScanner)
+    {
+        var action = _hotkeys.Route(
+            keyEvent,
+            new HotkeyContext(isFromBoundScanner, IsPaused, PendingError is not null));
+
+        switch (action)
+        {
+            case HotkeyAction.ToggleMode:
+                _modeManager.Toggle();
+                break;
+
+            case HotkeyAction.ForceSend:
+                ForceSend();
+                break;
+
+            case HotkeyAction.Cancel:
+                Cancel();
+                break;
+
+            case HotkeyAction.PauseResume:
+                Pause();
+                break;
+        }
+
+        return action;
     }
 
     private void FeedSession(in KeyEvent keyEvent)

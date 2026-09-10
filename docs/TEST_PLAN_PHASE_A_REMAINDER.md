@@ -71,7 +71,55 @@ Half these cases therefore assert that **nothing** was emitted. Spec §10 forbid
 
 ## 2. Task 8a — hotkey routing
 
-_Pending. Will cover every row of spec §7's pass-through table with synthetic source identities: F8 from a non-scanner keyboard toggles and is swallowed; F8 from the bound scanner stays scanner data; F10 and Esc swallowed only while an error is pending and passed through otherwise; everything passed through while paused._
+### 2.1 One decision the spec forced and one it did not
+
+| # | Decision | Rationale |
+|---|---|---|
+| D-21 | `Route` returns a **single action**. There is no separate "should I swallow it" flag, because acting always implies swallowing. | Spec §7 fixes it: "When Scanner Helper acts on a control hotkey, it consumes the key and does not forward it." The two are exactly equivalent, and a second field would be a second source of truth for one fact. The disagreement would also be unusually hard to diagnose — a hotkey that both fires *and* reaches the page would toggle the mode while simultaneously triggering an unrelated shortcut in the web application, which is the very thing spec §7 says the rule prevents. |
+| D-22 | An event whose source could **not** be determined is replayed but is **never** treated as a hotkey. | The spec does not address this case; it falls out of D-13. Replaying an unresolved event is right — a leaked scanner character is visible and correctable while a swallowed keystroke is not. But acting on it as a hotkey is not, because the consequences diverge sharply: wrongly replaying adds one visible character, whereas wrongly toggling sends the next few dozen scans out in the wrong mode with no indication, which is spec §19.1's silently wrong data. Spec §7's "scanner F8 must never toggle" therefore deserves to treat "we do not know whether it was the scanner" exactly as it treats "we know it was". When in doubt, miss a mode switch — the operator presses again — rather than make an extra one. |
+
+### 2.2 Cases
+
+Every row of spec §7's table, plus the cases the table does not state.
+
+| ID | Scenario | Expected |
+|---|---|---|
+| HK1 | F8 from a normal keyboard, not paused | `ToggleMode`, swallowed |
+| HK2 | F8 from the bound scanner | `None` — scanner data, never a command |
+| HK3/HK4 | F10 with / without a pending error | `ForceSend` / `None` |
+| HK5/HK6 | Esc with / without a pending error | `Cancel` / `None` |
+| HK7 | Any hotkey while paused, error pending | `None` for all of them |
+| HK8 | Key-**up** for any hotkey | `None` |
+| HK9 | An unassigned hotkey, and virtual key `0` | `None` |
+| HK10 | An ordinary letter | `None` |
+| HK11 | The pause hotkey **while paused** | `None` — it cannot resume |
+| HK12 | A synthesized (injected) F8 or F10 | `None` |
+| HK13 | Duplicate assignments, including differing case | Conflict reported, naming the key |
+| HK14 | Unassigned, empty and whitespace entries | Not conflicts; the default configuration saves |
+| CO16 | F8 from a keyboard, through the coordinator | Mode toggles; **not** replayed |
+| CO17 | F8 from the scanner, through the coordinator | Mode unchanged |
+| CO18 | F8 whose source was never resolved | Replayed; mode **unchanged** (D-22) |
+
+### 2.3 Why particular cases exist
+
+**HK7 is the definition of `PAUSED`, not a special case of it.** Spec §5.7 requires the pipeline to be bypassed entirely while paused, with input reaching the business application exactly as if this program were not installed. Intercepting even one key makes that untrue — and PAUSED exists to rescue the operator when capture, correlation and replay are broken, which a "bypass" that still intercepts some keys cannot do.
+
+**HK8 guards a bug that is routinely misdiagnosed.** Each keystroke produces a down and an up, so acting on both means one F8 press toggles twice for a net effect of nothing. On site that reads as "F8 does nothing", and the investigation goes entirely the wrong way: the operator suspects an unregistered hotkey, a broken keyboard, or the program not running. Nobody suspects it toggled twice — and stepping through it on a development machine shows both toggles plainly, which is why defects of this kind so often "fix themselves" during a demonstration.
+
+**HK11 pins a consequence the spec states and which still looks like a bug.** No hotkey is intercepted while paused, the pause hotkey included, so it can only ever pause and never resume. Spec §5.7 calls that "the correct, expected consequence of bypassing the pipeline, not a bug". Without a test, somebody will eventually fix it — and in doing so re-create the situation §5.7 was written to prevent, since resuming must remain reachable with the mouse alone. Assumption A4 sharpens it further: the workstation is a laptop with no spare keyboard, and the touchpad is the only way back.
+
+**HK12 matters more than it looks.** Spec §19.1's heartbeat emits a synthesized event **every few seconds**. If a synthesized event could fire a hotkey and the probe key happened to collide with one, the mode would toggle on a regular cycle — presenting on site as "the mode changes by itself".
+
+**HK13's conflict check belongs at save time, not runtime.** Suppose Cancel is also set to F8: at runtime Toggle Mode matches first, F8 switches the mode, and the Cancel hotkey simply never works with no indication. On site F8 switches modes fine while nothing cancels a pending error, so the operator concludes error handling is broken when two hotkeys have collided — symptom and cause with nothing visibly connecting them. The check returns the conflicting **names** rather than a boolean so Settings can say "F8 is assigned to more than one function" instead of leaving the operator guessing across four fields.
+
+**HK14 exists because the default configuration must be savable.** Spec §13.3 leaves the pause hotkey unassigned, and treating "both unassigned" as a conflict would refuse the operator the first time they open Settings, change nothing, and click save.
+
+### 2.4 Guards verified by injecting the violation
+
+| Violation injected | Result |
+|---|---|
+| Let key-**up** events act | **HK8 fails** |
+| Drop the "source must be resolved" gate before hotkey routing | **CO18 fails**, reporting D-22's reasoning back |
 
 ---
 

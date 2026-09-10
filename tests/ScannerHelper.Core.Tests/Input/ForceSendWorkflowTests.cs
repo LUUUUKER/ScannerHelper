@@ -83,7 +83,8 @@ public class ForceSendWorkflowTests
                 RuleType = SkuParsingRuleType.FixedPosition, StartPosition = 5, Length = 8,
             }),
             validator ?? SkuValidatorFactory.Create(new SkuValidationSettings()),
-            _output);
+            _output,
+            new HotkeyCoordinator(default));
 
     /// <summary>
     /// 中文：模拟扫码枪送出一整枪。每个字符先走钩子再走 Raw Input，
