@@ -109,45 +109,54 @@ has acquired a Windows dependency.
 
 ## 当前进度 / Status
 
+> **2026-09-10：输入架构已更换。** Task 4b 的硬性关卡失败——实测证明**按键一旦被
+> `WH_KEYBOARD_LL` 吞掉，Windows 就不再为它产生 `WM_INPUT`**，所以「先扣留、等
+> Raw Input 揭示来源、再决定」不可能实现：扣留这个动作本身销毁了做决定所需要的证据。
+>
+> 扫码枪改为工作在 **USB 虚拟串口**模式，它不再打字，业务软件收不到它发出的任何东西。
+> 21 枪实测零误差（357 字节 = 21 × 17）。
+>
+> - 失败证据：[`docs/TASK_4B_FINDING_20260910.md`](docs/TASK_4B_FINDING_20260910.md)
+> - 新架构与逐条影响：[`docs/ARCHITECTURE_CHANGE_SERIAL.md`](docs/ARCHITECTURE_CHANGE_SERIAL.md)
+
 | 阶段 | 任务 | 状态 |
 |---|---|---|
-| Phase A | 1 解决方案边界 | ✅ |
-| Phase A | 2 领域类型、模式、解析、校验 | ✅ |
-| Phase A | 3 配置模型与 JSON 持久化 | ✅ |
-| Phase A | 6 ScanSession / ScanInputCoordinator / InputEventCorrelator | ✅ |
-| Phase A | 7a 输出接口与强制发送流程 | ✅ |
-| Phase A | 8a 热键路由规则 | ✅ |
-| Phase A | 5a DeviceIdentityMatcher | ✅ |
-| | **Phase A 完成 —— 230 个用例，零警告** | ✅ |
-| Phase B | 4a 输入观测 spike | ✅ 测量完成，**尚未在现场机复现** |
-| Phase B | 4b 输入拦截 spike — **硬性关卡** | ⬜ |
-| Phase B | 5b、7b、8b、9–13 | ⬜ |
+| 基础 | 1 解决方案边界 | ✅ |
+| 基础 | 2 领域类型、模式、解析、校验 | ✅ |
+| 基础 | 3 配置模型与 JSON 持久化 | ✅ |
+| 基础 | 7a 输出契约与强制发送流程 | ✅ |
+| 基础 | 8a 热键路由规则 | ✅ |
+| 基础 | 5a DeviceIdentityMatcher | ✅ |
+| spike | 4a 输入观测 | ✅ 测量完成，结论有效 |
+| spike | 4b 输入拦截 — **硬性关卡** | ❌ **失败**，架构因此更换 |
+| spike | 虚拟串口验证 | ✅ 21 枪零误差 |
+| 新架构 | `IScannerInputSource` / `ScanProcessor` | ✅ |
+| 新架构 | `SerialScannerReader` / `SerialScannerInputSource` | ✅ |
+| 新架构 | 端到端：串口 → 处理 → 输出 | ✅ 实机验证 |
+| 新架构 | 端口 ↔ USB 设备身份、热插拔 | ⬜ |
+| 新架构 | 热键（`RegisterHotKey` 优先） | ⬜ |
+| 新架构 | 正式界面、本地化、设置界面、诊断、试点 | ⬜ |
+| | **当前 196 个用例，零警告** | ✅ |
 
-Task 4b 是硬性关卡。若 Raw Input 与低层键盘钩子的关联被证明不可靠，
-**停下来汇报证据，不要用时序启发式把症状掩盖过去**（规格 §4.3）。
+退役的任务：6（`ScanSession` / `ScanInputCoordinator` / `InputEventCorrelator`）
+随旧架构一起删除。它的业务那一半——模式、解析、校验、输出、待决错误——保留在
+`ScanProcessor` 里并重新钉了测试（SP1~SP17）。
 
-Task 4b is a hard gate. If Raw Input/hook correlation proves unreliable, stop and
-report the evidence rather than hiding the symptoms behind timing heuristics
-(spec §4.3).
+用例数从 248 降到 196，不是覆盖变差了，是**被覆盖的东西没有了**：关联器、扣留队列、
+按键级拼装、以及「一枪收到一半就断了」这个概念，在串口模式下都不存在。
 
-### 两个仍然开着的问题 / Two questions still open
+### 仍然开着的问题 / Still open
 
-这两条都属于 Phase B，且都必须在试点之前有答案。
+1. **有人把扫码枪切回键盘模式。** 那之后串口好好地开着、不报任何错、也没有数据，
+   而扫码枪开始直接往业务软件里打字。这是新架构下 §19.1 那类「看起来在工作」的
+   失效，必须靠「多久没收到数据」检测，界面不得显示一个没有验证过的「正常」。
 
-1. **4a 的数字尚未在现场机器上复现。** 事件时序是机器的性质，不是代码的性质，
-   而开发机不是试点机。
+2. **端口号会变。** 换一个 USB 口 `COM3` 可能变成 `COM7`，所以绑定要认 VID/PID
+   或序列号，不能记住端口号。
 
-2. **钩子看到的码是否完整。** Task 4a 实测发现，**本程序完全没有运行**时，
-   这把扫码枪就已经在往 Windows 的路上丢字符了（规格 §22.5）。Phase A 的
-   任何测试都答不了这个问题——这里全部的逻辑都假定关联器拿到的是真实发生过
-   的事件。硬件若不给，正确的逻辑只会产出一个自信的错误结果，而那正是
-   规格 §19.1 最在意的失效形态。
+3. **上线多了一步。** 每把新枪都要扫一次配置条码切到虚拟串口模式，配置码要和程序
+   一起发。
 
-Both belong to Phase B and both need an answer before the pilot. First, 4a's figures have
-not been reproduced on pilot hardware: event timing is a property of the machine, not of
-the code. Second, whether the hook receives a complete code — Task 4a found this scanner
-already losing characters on its way to Windows with Scanner Helper not running at all
-(spec §22.5), and no Phase A test can settle it. Everything here assumes the correlator is
-handed the events that actually occurred; if the hardware does not deliver them, correct
-logic produces a confidently wrong result, which is the failure mode spec §19.1 cares about
-most.
+Both the architecture change and its evidence are documented in `docs/`. The retired half of
+the old input pipeline is gone from the code but preserved in git history; the case for the
+change rests on the two documents linked above, not on keeping unusable code compiling.

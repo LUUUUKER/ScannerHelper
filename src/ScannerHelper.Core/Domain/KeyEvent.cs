@@ -114,11 +114,4 @@ public readonly record struct KeyEvent(
     ushort VirtualKey,
     char? Character,
     bool IsInjected)
-{
-    /// <summary>
-    /// 中文：跨通道关联用的身份。不含虚拟键码（决策 D-11）。
-    /// English: The identity used for cross-channel correlation, free of the virtual key
-    ///          (decision D-11).
-    /// </summary>
-    public KeyIdentity Identity => new(ScanCode, IsExtended, IsKeyUp);
-}
+;

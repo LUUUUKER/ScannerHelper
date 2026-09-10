@@ -1,11 +1,8 @@
 <Application x:Class="ScannerHelper.Diagnostics.Harness.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
-             StartupUri="MainWindow.xaml"
-             xmlns:interception="clr-namespace:ScannerHelper.Diagnostics.Harness.Interception">
+             StartupUri="MainWindow.xaml">
     <Application.Resources>
-
-        <interception:GateResultConverter x:Key="GateResultConverter" />
 
         <!--
             中文：诊断工具的视觉风格刻意保持朴素：这是给工程师和现场人员读数据用的，

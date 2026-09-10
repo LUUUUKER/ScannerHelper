@@ -100,8 +100,6 @@ public partial class MainWindow : Window
     /// English: The open 4b interception window, or null. Held so that only one can exist at a
     ///          time: two windows would mean two hooks and two raw-input registrations.
     /// </summary>
-    private InterceptionWindow? _interceptionWindow;
-
     /// <summary>
     /// 中文：打开着的串口验证窗口，null 表示没开。同样只允许一个——两个窗口
     ///       会抢同一个串口，而后开的那个只会得到「端口被占用」。
@@ -160,14 +158,6 @@ public partial class MainWindow : Window
             StartButton.IsEnabled = false;
             StopButton.IsEnabled = true;
 
-            // ★ 观测期间不许打开拦截窗口：两个窗口各自装一个低层键盘钩子、
-            //   各自注册一次 Raw Input，事件会同时走两条链路。测出来的数字
-            //   于是既不是 4a 的、也不是 4b 的，而两边看起来都很正常。
-            // Interception may not be opened while observing: two windows would each install a
-            // low-level hook and register raw input, sending every event down both chains. The
-            // resulting numbers describe neither 4a nor 4b, and both sides look fine.
-            InterceptionButton.IsEnabled = false;
-
             StatusText.Text = $"观测中 / Observing — 开始于 {_session.StartedAt:HH:mm:ss}";
 
             RefreshDeviceList();
@@ -185,44 +175,6 @@ public partial class MainWindow : Window
                 MessageBoxButton.OK,
                 MessageBoxImage.Error);
         }
-    }
-
-    /// <summary>
-    /// 中文：
-    ///   打开 Task 4b 的拦截关卡窗口。
-    ///
-    ///   ★ 同一时刻只允许开一个。开两个就是两套钩子加两次 Raw Input 注册，
-    ///     事件被处理两遍——而两个窗口各自看都很正常，这类错误最难被发现。
-    ///
-    ///   本窗口在拦截窗口开着的时候禁用「开始观测」，理由同上。
-    /// English:
-    ///   Opens the Task 4b hard-gate window.
-    ///
-    ///   Only one at a time: two would mean two hooks and two raw-input registrations with every
-    ///   event handled twice — and each window would look entirely normal on its own, which is
-    ///   the hardest kind of mistake to notice. Observation is likewise disabled while the
-    ///   interception window is open.
-    /// </summary>
-    private void OnInterceptionClicked(object sender, RoutedEventArgs e)
-    {
-        if (_interceptionWindow is not null)
-        {
-            _interceptionWindow.Activate();
-            return;
-        }
-
-        var window = new InterceptionWindow { Owner = this };
-        _interceptionWindow = window;
-
-        StartButton.IsEnabled = false;
-
-        window.Closed += (_, _) =>
-        {
-            _interceptionWindow = null;
-            StartButton.IsEnabled = true;
-        };
-
-        window.Show();
     }
 
     /// <summary>
@@ -277,7 +229,6 @@ public partial class MainWindow : Window
 
         StartButton.IsEnabled = true;
         StopButton.IsEnabled = false;
-        InterceptionButton.IsEnabled = true;
         StatusText.Text = "已停止 / Stopped";
 
         RefreshStatistics();

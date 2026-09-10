@@ -87,6 +87,20 @@ public interface ICaptureThreadWork
     ///   moment when nothing is happening any more — and then the queue is empty by
     ///   definition.
     /// </summary>
+    /// <remarks>
+    /// 中文：
+    ///   ★ 目前**没有任何实现需要它**：唯一的实现是 Task 4a 的观测捕获，它返回零。
+    ///     需要周期推进的是 4b 的关联超时，而 4b 已随架构变更退役
+    ///     （ARCHITECTURE_CHANGE_SERIAL.md）。留着它是因为热插拔检测很可能会用上
+    ///     同一条线程——但那一天到来之前，这里如实写明它现在是空转的，好过让人
+    ///     以为有东西在依赖它。
+    /// English:
+    ///   No implementation currently needs this: the only one is Task 4a's observing capture,
+    ///   which returns zero. Periodic advance was 4b's need for correlation timeouts, and 4b
+    ///   retired with the architecture change (ARCHITECTURE_CHANGE_SERIAL.md). It is kept
+    ///   because hot-plug detection will likely want the same thread — but until then, saying
+    ///   plainly that it idles beats letting someone assume something depends on it.
+    /// </remarks>
     TimeSpan TickInterval { get; }
 
     /// <summary>

@@ -6,7 +6,8 @@
 //
 //   Core 中**任何**超时都必须经过本接口，绝不直接读 DateTime.UtcNow、
 //   Stopwatch 或 Environment.TickCount。理由是最高风险的两个组件都靠时间
-//   判断：ScanSession 的约 300 毫秒扫描无活动超时，以及 InputEventCorrelator
+//   判断。（历史注记：这两句原先举的例子是 ScanSession 的扫描超时与
+//   InputEventCorrelator
 //   的关联窗口。直接读系统时钟意味着这两处只能用 Thread.Sleep 来测——
 //   慢、不稳定，而且永远测不到"刚好卡在边界上"那一档。注入时间源之后，
 //   测试可以精确地把时间推到 299 毫秒和 301 毫秒各跑一次。
@@ -34,7 +35,8 @@
 //   Every timeout in Core must go through this interface and never read
 //   DateTime.UtcNow, Stopwatch or Environment.TickCount directly. The two
 //   highest-risk components both turn on time: ScanSession's ~300 ms scan
-//   inactivity timeout and InputEventCorrelator's correlation window. Reading the
+//   inactivity timeout and InputEventCorrelator's correlation window — both retired with the
+//   old architecture on 2026-09-10; see ARCHITECTURE_CHANGE_SERIAL.md. Reading the
 //   system clock directly would leave both testable only via Thread.Sleep — slow,
 //   flaky, and never able to hit the boundary exactly. With time injected, a test
 //   can run the same case at 299 ms and at 301 ms deterministically.

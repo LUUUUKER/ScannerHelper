@@ -32,23 +32,11 @@
                     <Border Width="1" Background="#D0D0D0" Margin="12,2,12,2" />
 
                     <!--
-                        中文：通往 4b 的门。刻意做成另一个窗口，而不是本窗口的一个标签页：
-                              本窗口的安全性质是「没有任何一条通向吞掉按键的代码路径」，
-                              把会吞按键的东西放进同一个窗口，那句话立刻就不成立了。
-                        English: The door to 4b. Deliberately another window rather than a tab
-                                 here: this window's safety property is "no code path swallows a
-                                 keystroke", and putting something that swallows into the same
-                                 window would void that sentence immediately.
-                    -->
-                    <Button x:Name="InterceptionButton" Content="⚠ 打开拦截关卡 / Interception (4b)"
-                            Width="230" Height="28" Click="OnInterceptionClicked" />
-
-                    <!--
                         中文：4b 关卡失败之后的新方向（选项 A）。这个窗口不碰键盘，
-                              所以不和 4a、4b 互斥——它压根不装钩子。
+                              也就不和左边的观测互斥——它压根不装钩子。
                         English: The direction taken after 4b failed (Option A). This window
-                                 touches no keyboard and therefore needs no mutual exclusion
-                                 with 4a or 4b: it installs no hook at all.
+                                 touches no keyboard and therefore needs no mutual exclusion with
+                                 observation: it installs no hook at all.
                     -->
                     <Button x:Name="SerialButton" Content="虚拟串口验证 / Virtual COM"
                             Width="200" Height="28" Margin="8,0,0,0" Click="OnSerialClicked" />

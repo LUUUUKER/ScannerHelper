@@ -221,9 +221,6 @@ public partial class EndToEndWindow : Window
             ScanOutcome.Cancelled cancelled => (
                 cancelled.RawCode, "已取消，未发出 / cancelled, nothing sent"),
 
-            ScanOutcome.ScanFailed failed => (
-                failed.Failure.PartialRawCode, $"扫描未完成 / incomplete：{failed.Failure.Reason}"),
-
             _ => (string.Empty, outcome.ToString() ?? string.Empty),
         };
 

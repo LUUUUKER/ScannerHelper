@@ -8,7 +8,6 @@
 //
 //     这不是实现细节，是规格里两条不同规定的直接后果：
 //
-//       ScanFailed（超时 / 空扫描 / 过长）
 //         规格 §5.4 对扫描超时写得很明确：丢弃这次不完整的扫描、不产生任何
 //         业务输入、回到 IDLE、显示一个可见的扫描错误。
 //         **没有 F10 这条路。** 因为手里那半截根本不是完整的条码，把它发出去
@@ -50,11 +49,9 @@
 // 包含的类型 / Types in this file:
 //   ScanOutcome                   抽象基类型，构造函数私有，分支集合封闭
 //   ScanOutcome.Emit              可以发送
-//   ScanOutcome.ScanFailed        扫描本身没完成，不进入待决错误
 //   ScanOutcome.ParseFailed       解析失败，进入待决错误
 //   ScanOutcome.ValidationFailed  校验失败，进入待决错误
 //   PendingScanError              待决错误的内容
-//   ReplayRequestedEventArgs      请求补发一次被扣留的按键
 //   ScanProcessedEventArgs        一枪处理完毕
 // =============================================================================
 
@@ -123,8 +120,6 @@ public abstract record ScanOutcome
     ///   it without noticing.
     /// </summary>
     public sealed record EmitRawWhilePaused(string RawCode) : ScanOutcome;
-
-    public sealed record ScanFailed(ScanResult.Failed Failure) : ScanOutcome;
 
     /// <summary>
     /// 中文：SKU 解析失败。**进入待决错误**，等待 F10 或 Esc（规格 §10）。
@@ -224,36 +219,6 @@ public abstract record ScanOutcome
 ///          reconstruct the context (spec §15).
 /// </param>
 public sealed record PendingScanError(string RawCode, ScanMode Mode);
-
-/// <summary>
-/// 中文：请求补发一次之前被扣留的按键。
-///
-///       ★ 订阅方**必须**真的发出去。收到它却不处理，等于让工人的按键凭空
-///         消失——规格 §19 明写绝不无限期吞掉普通键盘输入，而笔记本工位
-///         没有备用键盘可插（规格假设 A4）。
-/// English: A request to re-emit a previously withheld keystroke.
-///
-///          Subscribers must actually emit it. Receiving this and doing nothing makes the
-///          operator's keystroke vanish — spec §19 forbids swallowing normal keyboard input
-///          indefinitely, and a laptop workstation has no spare keyboard (assumption A4).
-/// </summary>
-public sealed class ReplayRequestedEventArgs : EventArgs
-{
-    /// <summary>
-    /// 中文：构造补发请求。
-    /// English: Creates the request.
-    /// </summary>
-    public ReplayRequestedEventArgs(KeyEvent keyEvent) => KeyEvent = keyEvent;
-
-    /// <summary>
-    /// 中文：要补发的按键，原样带回。扫描码、扩展位、方向都必须原封不动地重现，
-    ///       否则重放出来的就不是工人按下的那一下。
-    /// English: The keystroke to re-emit, unchanged. Its scan code, extended flag and
-    ///          direction must be reproduced exactly, or what is replayed is not what the
-    ///          operator pressed.
-    /// </summary>
-    public KeyEvent KeyEvent { get; }
-}
 
 /// <summary>
 /// 中文：一枪处理完毕。

@@ -2,7 +2,14 @@
 // ForceSendWorkflowTests.cs
 //
 // 中文：
-//   输出契约与强制发送流程（Task 7a，用例编号 FS1~FS15）。
+//   输出契约与强制发送流程（Task 7a，用例编号 FS1~FS15；FS8 随架构变更退役）。
+//
+//   ★ FS8（扫描超时绝不发送）已删除。它测的是「一枪收到一半就断了」，而那种
+//     残缺是键盘模拟通道特有的（规格 §22.5，字符间隔中位数 1.1 毫秒）。串口
+//     模式下帧边界由终止符给出，一次扫描到达时就已经是完整的——"半截码"这个
+//     概念不再存在，所以那条用例没有可测的对象了。
+//     实测佐证：21 枪、357 字节 = 21 × 17，一个字节不多不少
+//     （ARCHITECTURE_CHANGE_SERIAL.md §2）。
 //
 //   本组测的是整条流水线的**唯一出口**。错误数据要写进仓库系统，只能从这里
 //   出去——规格 §19.1 反复强调的"静默的错误数据"，具体形态就是：程序看起来
@@ -45,7 +52,6 @@
 //   Append_enter_enabled_emits_exactly_one_enter_in_sku     FS5
 //   Parse_failure_emits_nothing                             FS6
 //   Validation_failure_emits_nothing                        FS7
-//   Scan_timeout_emits_nothing                              FS8
 //   Force_send_emits_the_raw_code_not_the_parsed_candidate  FS9
 //   Force_send_honours_append_enter                         FS10
 //   Cancel_emits_nothing                                    FS11
@@ -66,50 +72,52 @@ namespace ScannerHelper.Core.Tests.Input;
 
 public class ForceSendWorkflowTests
 {
-    private const long ScannerDeviceId = 1001;
-
-    private readonly TestSystemClock _clock = new();
     private readonly ModeManager _modeManager = new();
     private readonly RecordingKeyboardOutputService _output = new();
 
-    private ScanInputCoordinator CreateCoordinator(
+    private ScanProcessor CreateCoordinator(
         ISkuParser? parser = null, ISkuValidator? validator = null)
         => new(
-            new InputEventCorrelator(_clock) { BoundScannerDeviceId = ScannerDeviceId },
-            new ScanSession(_clock),
             _modeManager,
             parser ?? SkuParserFactory.Create(new SkuParsingSettings
             {
                 RuleType = SkuParsingRuleType.FixedPosition, StartPosition = 5, Length = 8,
             }),
             validator ?? SkuValidatorFactory.Create(new SkuValidationSettings()),
-            _output,
-            new HotkeyCoordinator(default));
+            _output);
 
     /// <summary>
-    /// 中文：模拟扫码枪送出一整枪。每个字符先走钩子再走 Raw Input，
-    ///       中间推进 1 毫秒，贴近实测的约 1.1 毫秒节奏。
-    /// English: Simulates a full scan: each character through the hook then Raw Input, 1 ms
-    ///          apart, close to the measured ~1.1 ms cadence.
+    /// 中文：
+    ///   送出一整枪。
+    ///
+    ///   ★ 这个辅助方法从二十几行缩成一行，本身就是架构变更的度量。
+    ///
+    ///     原来它要逐个字符地模拟"先走钩子、再走 Raw Input、中间推进 1 毫秒"，
+    ///     还要在末尾补一个回车当终止符——因为旧架构必须从键盘流里把扫码枪
+    ///     认出来，而那件事在 2026-09-10 被实测证明做不到
+    ///     （TASK_4B_FINDING_20260910.md）。串口模式下一次扫描天然就是一个
+    ///     完整的原始码，终止符是帧边界、不进入内容。
+    ///
+    ///     被删掉的不只是代码：那二十行里每一行都是一个可能与真实硬件不符的
+    ///     假设，而测试里的假设错了是最难发现的一类错误——它会让测试全绿，
+    ///     同时让现场全错。
+    /// English:
+    ///   Sends one whole scan.
+    ///
+    ///   That this helper shrank from twenty-odd lines to one is itself a measure of the
+    ///   architecture change. It used to simulate each character through the hook and then Raw
+    ///   Input a millisecond apart, appending a carriage return as the terminator, because the old
+    ///   design had to pick the scanner out of the keyboard stream — something measurement proved
+    ///   impossible on 2026-09-10 (TASK_4B_FINDING_20260910.md). On a serial port a scan is
+    ///   inherently one complete raw code, and the terminator is a frame boundary that never
+    ///   enters the content.
+    ///
+    ///   More than code went: every one of those twenty lines was an assumption that could differ
+    ///   from real hardware, and a wrong assumption inside a test is the hardest kind of error to
+    ///   find — it keeps the suite green while the floor is wrong.
     /// </summary>
-    private void Scan(ScanInputCoordinator coordinator, string content)
-    {
-        ushort scanCode = 0x20;
-
-        foreach (var character in content + '\r')
-        {
-            coordinator.OnHookEvent(new KeyEvent(
-                _clock.MonotonicNow, scanCode, IsExtended: false, IsKeyUp: false,
-                VirtualKey: 0x44, character, IsInjected: false));
-            _clock.Advance(TimeSpan.FromMilliseconds(1));
-
-            coordinator.OnRawInputEvent(new RawInputEvent(
-                _clock.MonotonicNow, scanCode, IsExtended: false, IsKeyUp: false, ScannerDeviceId));
-            _clock.Advance(TimeSpan.FromMilliseconds(1));
-
-            scanCode = (ushort)(scanCode == 0x2F ? 0x20 : scanCode + 1);
-        }
-    }
+    private static void Scan(ScanProcessor coordinator, string content)
+        => coordinator.OnScanReceived(content);
 
     /// <summary>
     /// 中文：FS1 —— SN 模式发出完整的原始码（规格 §3）。
@@ -266,45 +274,6 @@ public class ForceSendWorkflowTests
 
         Assert.True(_output.EmittedNothing);
         Assert.NotNull(coordinator.PendingError);
-    }
-
-    /// <summary>
-    /// 中文：
-    ///   FS8 —— 扫描超时绝不发送任何内容（规格 §5.4）。
-    ///
-    ///   ★ 这条与 FS6、FS7 的区别在于**它连待决错误都不进**，因此工人连
-    ///     F10 这条路都没有。手里那半截根本不是完整条码，把它发出去等于
-    ///     主动往仓库系统里写错误数据——而 Task 4a 已经实测到这类残缺确实
-    ///     会发生（规格 §22.5）。
-    /// English:
-    ///   FS8 — a scan timeout emits nothing (spec §5.4). Unlike FS6 and FS7 it does not even
-    ///   enter the pending-error state, so there is no F10 path either: half a code was never a
-    ///   complete barcode and emitting it would volunteer bad data into the warehouse system —
-    ///   and Task 4a confirmed such damage genuinely occurs (spec §22.5).
-    /// </summary>
-    [Fact]
-    public void Scan_timeout_emits_nothing()
-    {
-        var coordinator = CreateCoordinator();
-        ushort scanCode = 0x20;
-
-        foreach (var character in "DGKJRD")
-        {
-            coordinator.OnHookEvent(new KeyEvent(
-                _clock.MonotonicNow, scanCode, false, false, 0x44, character, false));
-            _clock.Advance(TimeSpan.FromMilliseconds(1));
-            coordinator.OnRawInputEvent(new RawInputEvent(
-                _clock.MonotonicNow, scanCode, false, false, ScannerDeviceId));
-            _clock.Advance(TimeSpan.FromMilliseconds(1));
-            scanCode++;
-        }
-
-        _clock.Advance(TimeSpan.FromMilliseconds(300));
-        coordinator.Tick();
-
-        Assert.True(_output.EmittedNothing);
-        Assert.True(coordinator.PendingError is null,
-            "扫描超时不进入待决错误，因此连 F10 这条路都没有（规格 §5.4）。");
     }
 
     /// <summary>
