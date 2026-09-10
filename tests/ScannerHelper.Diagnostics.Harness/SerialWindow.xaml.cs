@@ -67,6 +67,7 @@ public partial class SerialWindow : Window
     private Exception? _lastFault;
     private int _frameIndex;
     private int _mismatchCount;
+    private string _lastCheckedExpectation = string.Empty;
 
     /// <summary>
     /// 中文：构造窗口。
@@ -214,28 +215,29 @@ public partial class SerialWindow : Window
         // 步骤 1 / Step 1
         var expected = ExpectedText.Text;
 
+        var arrived = false;
+
         while (_pendingFrames.TryDequeue(out var frame))
         {
             _frameIndex++;
-
-            var matches = expected.Length == 0 || frame.Text == expected;
-            if (!matches)
-            {
-                _mismatchCount++;
-            }
+            arrived = true;
 
             _frameRows.Insert(0, new FrameRow(
-                Index: _frameIndex,
-                Time: DateTimeOffset.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
-                Text: frame.Text,
-                Length: frame.Text.Length,
-                Terminator: frame.Terminator,
-                Match: expected.Length == 0 ? "—" : matches ? "✅" : "❌"));
+                index: _frameIndex,
+                time: DateTimeOffset.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture),
+                text: frame.Text,
+                length: frame.Text.Length,
+                terminator: frame.Terminator));
         }
 
         while (_frameRows.Count > 500)
         {
             _frameRows.RemoveAt(_frameRows.Count - 1);
+        }
+
+        if (arrived || expected != _lastCheckedExpectation)
+        {
+            RecheckAll(expected);
         }
 
         // 步骤 2 / Step 2
@@ -315,6 +317,52 @@ public partial class SerialWindow : Window
         return text.ToString();
     }
 
+    /// <summary>
+    /// 中文：
+    ///   拿当前的期望内容把**所有**已收到的帧重核一遍。
+    ///
+    ///   ★ 这个方法是一个毛病的修正，而那个毛病和关卡报告曾经犯的是同一个：
+    ///     底部写着「全部正确」，而「核对」那一列全是「—」——也就是说，那句
+    ///     结论下面没有任何数据。原来的做法是在帧到达的那一刻核对一次，
+    ///     于是**先扫码、后填期望内容**（最自然的顺序）时，一次核对都没发生过，
+    ///     结论却照样给了出来。
+    ///
+    ///     一个会给出没有数据支撑的结论的验证工具，比不给还糟：它把「没验过」
+    ///     伪装成了「验过且通过」。所以期望内容一变就全部重核。
+    /// English:
+    ///   Re-checks every frame received so far against the current expected value.
+    ///
+    ///   This fixes the same defect the gate report once had: the verdict read "all correct"
+    ///   while every row's check column read "—", meaning nothing supported that sentence.
+    ///   Checking only at arrival meant that scanning first and typing the expected value
+    ///   afterwards — the natural order — performed no check at all, yet still produced a
+    ///   verdict. A verification tool that states conclusions its data does not support is worse
+    ///   than none: it disguises "never checked" as "checked and passed". So every frame is
+    ///   re-checked whenever the expectation changes.
+    /// </summary>
+    private void RecheckAll(string expected)
+    {
+        _lastCheckedExpectation = expected;
+        _mismatchCount = 0;
+
+        foreach (var row in _frameRows)
+        {
+            if (expected.Length == 0)
+            {
+                row.Match = "—";
+                continue;
+            }
+
+            var matches = row.Text == expected;
+            row.Match = matches ? "✅" : "❌";
+
+            if (!matches)
+            {
+                _mismatchCount++;
+            }
+        }
+    }
+
     private void UpdateCounters()
     {
         var counters = new StringBuilder();
@@ -378,6 +426,49 @@ public partial class SerialWindow : Window
     /// 中文：帧列表里的一行。
     /// English: One row in the frame list.
     /// </summary>
-    private sealed record FrameRow(
-        int Index, string Time, string Text, int Length, string Terminator, string Match);
+    private sealed class FrameRow(
+        int index, string time, string text, int length, string terminator)
+        : System.ComponentModel.INotifyPropertyChanged
+    {
+        private string _match = "—";
+
+        /// <inheritdoc />
+        public event System.ComponentModel.PropertyChangedEventHandler? PropertyChanged;
+
+        /// <summary>中文：序号。 English: The ordinal.</summary>
+        public int Index { get; } = index;
+
+        /// <summary>中文：收到的时刻。 English: When it arrived.</summary>
+        public string Time { get; } = time;
+
+        /// <summary>中文：帧内容。 English: The frame's content.</summary>
+        public string Text { get; } = text;
+
+        /// <summary>中文：字符数。 English: The character count.</summary>
+        public int Length { get; } = length;
+
+        /// <summary>中文：终止符。 English: The terminator.</summary>
+        public string Terminator { get; } = terminator;
+
+        /// <summary>
+        /// 中文：与期望内容的核对结果。期望内容随时可改，所以它不是只读的。
+        /// English: How it compares with the expected value, which can change at any time — so
+        ///          this is not read-only.
+        /// </summary>
+        public string Match
+        {
+            get => _match;
+            set
+            {
+                if (_match == value)
+                {
+                    return;
+                }
+
+                _match = value;
+                PropertyChanged?.Invoke(
+                    this, new System.ComponentModel.PropertyChangedEventArgs(nameof(Match)));
+            }
+        }
+    }
 }

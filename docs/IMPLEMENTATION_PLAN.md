@@ -1,5 +1,31 @@
 # Scanner Helper V1 Implementation Plan
 
+> ## ⚠ Task 4b 的硬性关卡失败，路线已改 / The Task 4b hard gate failed; the route has changed
+>
+> 2026-09-10。实测证明**按键一旦被 `WH_KEYBOARD_LL` 吞掉，Windows 就不再为它产生
+> `WM_INPUT`**，所以 Task 4b 第 2 条不可达成。按本计划自己的规定：不得继续、不得用
+> 时序上的经验值掩盖症状，应当记录并重新审视架构——三件都做了。
+>
+> 扫码枪改为工作在 **USB 虚拟串口**模式（21 枪实测零误差，357 字节 = 21 × 17）。
+>
+> - 失败证据：[`TASK_4B_FINDING_20260910.md`](TASK_4B_FINDING_20260910.md)
+> - 新架构与逐条影响：[`ARCHITECTURE_CHANGE_SERIAL.md`](ARCHITECTURE_CHANGE_SERIAL.md)
+>
+> **对本计划的影响：**
+> - Task 4a —— 已完成，测量有效，保留为历史记录。
+> - Task 4b —— **已完成，结论是「此路不通」**。它做到了硬性关卡该做的事：在建完整应用
+>   之前否决掉一个不成立的假设。不再重试。
+> - Task 5（设备绑定）—— 改为绑定串口背后的 USB 设备身份。
+> - Task 6（ScanSession / 关联器）—— 关联器与按键级拼装作废；模式、解析、校验、输出保留。
+> - Task 7a/7b（输出）、8a（热键路由）、以及 Task 1–3 —— **不受影响**，230 个用例照常全绿。
+> - 新增：串口读取（已完成）、端口↔设备身份解析、端口健康检测。
+>
+> 2026-09-10: measurement proved that a keystroke swallowed by `WH_KEYBOARD_LL` produces no
+> `WM_INPUT`, so item 2 of Task 4b is unachievable. Per this plan's own rule the work stopped, the
+> failure was documented, and the architecture was revisited. The scanner now runs as a USB virtual
+> COM device, measured at 21 scans with zero error (357 bytes = 21 × 17).
+
+
 > **For agentic workers:** Implement task-by-task. Use TDD for Core behaviors. Do not proceed past the input-correlation spike (Task 4b) if it is unreliable.
 >
 > Development begins on macOS, so tasks are split into **Phase A** (cross-platform `net8.0`, no hardware) and **Phase B** (Windows, real scanner). See *Development environment* below and the revised *Recommended implementation order* at the end — the task numbers are not executed in numeric order.
@@ -250,6 +276,10 @@ The hook passes **every** event through unchanged. Nothing is swallowed, so this
 Commit the measurement report into `docs/`. It is the evidence base for every later architectural argument.
 
 ### Task 4b — Intercept and replay
+
+> **⚠ 已执行，结论：失败（2026-09-10）。** 第 2 条不可达成——吞掉按键会切断它的 Raw Input。这一节保留原文，因为它正是发现这件事的手段。见 [`TASK_4B_FINDING_20260910.md`](TASK_4B_FINDING_20260910.md)。
+> **Executed; failed (2026-09-10).** Item 2 is unachievable: swallowing a keystroke cuts off its Raw Input. Kept verbatim because it is what found this.
+
 
 Only after 4a. **Must demonstrate on real Windows hardware:**
 

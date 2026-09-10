@@ -1,5 +1,28 @@
 # Scanner Helper — Product & Technical Specification
 
+> ## ⚠ 本规格的输入架构已被取代 / The input architecture in this spec has been superseded
+>
+> 2026-09-10：Task 4b 的硬性关卡失败。实测证明**按键一旦被 `WH_KEYBOARD_LL` 吞掉，
+> Windows 就不再为它产生 `WM_INPUT`**，因此 §4 与 §5.3 的「扣留—关联—决定」不可能
+> 实现——扣留这个动作本身销毁了做决定所需要的证据。
+>
+> 扫码枪改为工作在 **USB 虚拟串口**模式：它不再打字，业务软件收不到它发出的任何东西。
+>
+> - 失败的证据：[`TASK_4B_FINDING_20260910.md`](TASK_4B_FINDING_20260910.md)
+> - 新架构与逐条影响：[`ARCHITECTURE_CHANGE_SERIAL.md`](ARCHITECTURE_CHANGE_SERIAL.md) ← **与本文件冲突时以它为准**
+>
+> 受影响的段落：§4（全部作废）、§5.1、§5.3（作废）、§5.4、§5.6、§6、§7、§19.1、§22.5、§16、§17。
+> **未受影响**：§8 解析、§9 校验、§10 输出契约、§11 界面、§12 本地化、§13 设置。
+>
+> 2026-09-10: Task 4b's hard gate failed. Measurement proved that **once a keystroke is swallowed
+> by a `WH_KEYBOARD_LL` callback, Windows produces no `WM_INPUT` for it**, so §4 and §5.3's
+> withhold-correlate-decide cannot be implemented: withholding destroys the evidence the decision
+> needs. The scanner now operates as a **USB virtual COM** device — it types nothing, and the
+> business application receives nothing it emits. See the two documents above;
+> `ARCHITECTURE_CHANGE_SERIAL.md` governs where it disagrees with this file.
+
+
+
 ## 1. Purpose
 
 Scanner Helper is a Windows desktop utility for warehouse workstations using USB barcode scanners in **HID Keyboard** mode.
@@ -113,6 +136,10 @@ Force Send does not change the current SN/SKU mode.
 
 ## 4. V1 Input Architecture
 
+> **⚠ 本节已作废（2026-09-10）。** Raw Input + `WH_KEYBOARD_LL` + 事件关联的整套设计不可能实现，实测证据见 [`TASK_4B_FINDING_20260910.md`](TASK_4B_FINDING_20260910.md)，替代方案见 [`ARCHITECTURE_CHANGE_SERIAL.md`](ARCHITECTURE_CHANGE_SERIAL.md)。本节保留是因为 §4.3 的强制 spike 正是发现这件事的手段——删掉它，就等于把「为什么换方案」的依据一起删掉。
+> **This section is void (2026-09-10).** It is kept because §4.3's mandatory spike is what discovered the problem; deleting it would delete the reason for the change.
+
+
 ### 4.1 Why this design
 
 The scanners are not uniform, and the product should avoid per-scanner prefix configuration and avoid kernel drivers.
@@ -197,6 +224,10 @@ PAUSED
 - Scanner Helper is waiting for physical input.
 
 ### 5.3 IDENTIFYING
+
+> **⚠ 本小节已作废（2026-09-10）。** 串口来的数据来源是确定的，不存在「来源未定」这个状态。见 [`ARCHITECTURE_CHANGE_SERIAL.md`](ARCHITECTURE_CHANGE_SERIAL.md)。
+> **Void (2026-09-10):** data arriving on a serial port has a known source, so there is no undecided state.
+
 
 - A physical key event is temporarily withheld while the corresponding Raw Input source is resolved.
 - If source is a normal keyboard, replay it via `SendInput` and return to IDLE.
@@ -291,6 +322,10 @@ The primary failure mode this state exists to rescue is *"the keyboard no longer
 ---
 
 ## 6. Scanner Device Binding
+
+> **⚠ 本节需改写（2026-09-10）。** 绑定对象从「Raw Input 设备句柄／设备路径」改为「串口 + 该端口背后的 USB 设备身份」。端口号会随插到哪个 USB 口而变，因此绝不能只存端口号。见 [`ARCHITECTURE_CHANGE_SERIAL.md`](ARCHITECTURE_CHANGE_SERIAL.md) §5.2。
+> **Rewritten (2026-09-10):** binding targets a COM port plus the USB identity behind it, never the port number alone — the number changes with which USB socket is used.
+
 
 V1 supports one active scanner per workstation.
 
@@ -1155,6 +1190,10 @@ Note that "no decorative animation" above does not conflict with the hazard stri
 ---
 
 ## 19. Security and Reliability Constraints
+
+> **⚠ §19.1 的形态已改变，要求不变（2026-09-10）。** 不再有钩子可被静默摘掉，但出现了一种新的同类失效：**有人把扫码枪切回键盘模式**——串口好好地开着却再无数据，而扫码枪开始直接往业务软件里打字。「界面绝不显示一个它没有验证过的运行状态」这条原则原样适用。见 [`ARCHITECTURE_CHANGE_SERIAL.md`](ARCHITECTURE_CHANGE_SERIAL.md) §5.1。
+> **§19.1 changes shape, not substance (2026-09-10):** no hook remains to be silently removed, but a new failure of the same kind appears — someone switches the scanner back to keyboard mode, the port stays open with no data, and the scanner types straight into the business application.
+
 
 - Keep low-level hook callback extremely fast.
 - Do not parse regex, perform file I/O, log synchronously, update UI, or perform expensive correlation logic directly inside the hook callback.
