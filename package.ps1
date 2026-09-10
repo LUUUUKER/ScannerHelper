@@ -70,12 +70,21 @@ if ($LASTEXITCODE -ne 0) { throw "publish 失败 / publish failed" }
 
 Copy-Item $readme $outDir
 
+# 现场探测脚本一起发。2.4G 接收器在 Windows 眼里是什么设备,这件事只能在工位那台
+# 机器上量,而人到了现场才发现工具没带是最浪费的一种往返。
+# The probe ships alongside: what a 2.4G receiver is in Windows' eyes can only be measured on the
+# workstation, and discovering on site that the tool was left behind is the most wasteful of trips.
+$tools = Join-Path $outDir '工具'
+New-Item -ItemType Directory -Path $tools -Force | Out-Null
+Copy-Item (Join-Path $root 'tools\检查扫码枪.ps1') $tools
+Copy-Item (Join-Path $root 'tools\检查扫码枪.bat') $tools
+
 $exe  = Join-Path $outDir 'ScannerHelper.exe'
 $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
 
 Write-Host ""
 Write-Host "输出 / Output: $outDir"
-Get-ChildItem $outDir | Format-Table Name, Length -AutoSize
+Get-ChildItem $outDir -Recurse | Format-Table FullName, Length -AutoSize
 Write-Host "SHA256: $hash"
 Write-Host ""
 

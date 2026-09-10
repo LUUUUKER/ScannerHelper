@@ -145,6 +145,26 @@ public sealed class SerialScannerReader : IDisposable
     /// </summary>
     private const int ReadTimeoutMilliseconds = 200;
 
+    /// <summary>
+    /// 中文：
+    ///   等读线程自己走的上限。读超时 200ms，正常情况下它最多 200ms 就看见停止
+    ///   标志退出了，给到 1 秒是宽裕的余量。
+    /// English:
+    ///   How long to wait for the reader thread to leave on its own. With a 200 ms read timeout it
+    ///   normally sees the stop flag within 200 ms; one second is generous headroom.
+    /// </summary>
+    private static readonly TimeSpan ReaderExitTimeout = TimeSpan.FromSeconds(1);
+
+    /// <summary>
+    /// 中文：
+    ///   关端口这一步本身的上限。见 Close 里的说明——超时之后宁可漏掉一个端口
+    ///   对象，也不能让工人点了退出而程序不退。
+    /// English:
+    ///   The deadline on closing the port itself. See Close: past it, leaking a port object is
+    ///   preferable to a program that will not exit after the operator asked it to.
+    /// </summary>
+    private static readonly TimeSpan PortCloseDeadline = TimeSpan.FromSeconds(2);
+
     private readonly byte[] _readBuffer = new byte[1024];
     private readonly StringBuilder _frame = new();
     private readonly object _lifetimeLock = new();
@@ -295,24 +315,111 @@ public sealed class SerialScannerReader : IDisposable
         {
             _stopRequested = true;
 
-            try
+            // ★ 顺序是**先等读线程走干净，再关端口**——反过来会挂死。
+            //
+            //   这一条是现场用"点了退出，程序卡死"换来的。
+            //
+            //   SerialPort.Close 会等自己内部的读操作结束。而我们的读线程此刻正
+            //   阻塞在 port.Read 里，于是关端口的那条线程（界面线程）就开始等一次
+            //   它无权结束的读。在 USB 转串口设备上，尤其是**设备已经被拔掉**之后，
+            //   那一等可能永远不结束——.NET 的 System.IO.Ports 在这一点上有长期
+            //   已知的问题。表现就是工人点了 × 之后整个窗口白掉。
+            //
+            //   而反过来就没有这个问题：停止标志已经置上，读最多 200ms 就超时一次，
+            //   读线程借那次超时看见标志自己退出。等它走了再关，端口上没有任何
+            //   在飞的操作，Close 是瞬间的。
+            //
+            // The order is: let the reader leave first, then close the port. The other way round
+            // hangs, and this was paid for on site with "the program freezes when you close it".
+            //
+            // SerialPort.Close waits for its own read to finish, and our reader thread is at that
+            // moment blocked in port.Read — so the closing thread (the UI thread) starts waiting on
+            // a read it has no power to end. On a USB-serial adapter, and especially once the device
+            // has been unplugged, that wait may never end; .NET's System.IO.Ports has a long-known
+            // problem here. What the operator sees is the window going white after clicking X.
+            //
+            // The other order has none of that: the stop flag is already set, a read times out
+            // within 200 ms, and the reader sees the flag and leaves. Once it has, nothing is in
+            // flight on the port and Close returns immediately.
+            // ★ 不能 Join 自己。读线程走 Faulted 那条路时，事件处理方原则上不该在
+            //   那条线程上关端口（会话是把故障挂起来交给 Tick 处理的，正是为此），
+            //   但这里多一行判断就能把"一旦有人这么做就永久冻住"整类问题挡掉——
+            //   Thread.Join 在自己这条线程上会一直等一个永远不会发生的结束。
+            // A thread must not join itself. The reader reaches Faulted on its own thread and its
+            // handler is not supposed to close the port from there — the session defers faults to
+            // Tick precisely for this — but one line here rules out an entire class of permanent
+            // freeze, since Thread.Join on the current thread waits for an end that cannot come.
+            if (_readerThread is { } readerThread && readerThread != Thread.CurrentThread)
             {
-                _port?.Close();
-            }
-            catch (IOException)
-            {
-                // 关一个已经被拔掉的端口会抛异常。这里没有任何可做的事，
-                // 也没有任何值得报告的事——目标就是它现在关着。
-                // Closing an already-unplugged port throws. There is nothing to do and nothing
-                // worth reporting: the goal was for it to be closed, and it is.
+                readerThread.Join(ReaderExitTimeout);
             }
 
-            _port?.Dispose();
+            _readerThread = null;
+
+            var port = _port;
             _port = null;
 
-            _readerThread?.Join(TimeSpan.FromSeconds(2));
-            _readerThread = null;
+            if (port is not null)
+            {
+                CloseWithDeadline(port);
+            }
         }
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   关端口，但**有上限**。
+    ///
+    ///   ★ 读线程已经走了，正常情况下这一步是瞬间的，这条兜底路径根本不会走到。
+    ///     它存在是因为设备被拔掉时 SerialPort 的收尾仍可能挂住，而那时的取舍
+    ///     很清楚：漏掉一个端口对象没有任何实际后果——进程结束时操作系统会收回
+    ///     句柄——而一个关不掉的程序会让工人以为整台机器死了。
+    ///
+    ///   ★ 用一条一次性的后台线程去关，而不是 Task。这条线程有可能永远不返回，
+    ///     那样会占住一个线程池线程不放；后台线程则不会拦住进程退出。
+    /// English:
+    ///   Closes the port under a deadline.
+    ///
+    ///   With the reader already gone this is instantaneous and the fallback never runs. It exists
+    ///   because SerialPort's teardown can still hang for an unplugged device, and the trade there
+    ///   is clear: a leaked port object has no practical consequence — the OS reclaims the handle
+    ///   when the process ends — while a program that will not close reads to the operator as a
+    ///   dead machine.
+    ///
+    ///   A one-shot background thread rather than a Task: this work may never return, which would
+    ///   hold a thread-pool thread forever, whereas a background thread cannot keep the process
+    ///   alive.
+    /// </summary>
+    private static void CloseWithDeadline(SerialPort port)
+    {
+        var finished = new ManualResetEventSlim(false);
+
+        var closer = new Thread(() =>
+        {
+            try
+            {
+                port.Close();
+                port.Dispose();
+            }
+            catch (Exception)
+            {
+                // 关一个已经被拔掉的端口会抛各种异常。这里没有任何可做的事，
+                // 也没有任何值得报告的事——目标就是它现在关着。
+                // Closing an already-unplugged port throws in several ways. There is nothing to do
+                // and nothing worth reporting: the goal was for it to be closed, and it is.
+            }
+            finally
+            {
+                finished.Set();
+            }
+        })
+        {
+            IsBackground = true,
+            Name = "ScannerHelper serial close",
+        };
+
+        closer.Start();
+        finished.Wait(PortCloseDeadline);
     }
 
     /// <inheritdoc />
