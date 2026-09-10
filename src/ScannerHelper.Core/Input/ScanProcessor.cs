@@ -364,6 +364,7 @@ public sealed class ScanProcessor
 
         Emit(pendingError.RawCode);
         ClearPendingError();
+        RaiseProcessed(new ScanOutcome.ForceSent(pendingError.RawCode));
         return true;
     }
 
@@ -373,12 +374,13 @@ public sealed class ScanProcessor
     /// </summary>
     public bool Cancel()
     {
-        if (PendingError is null)
+        if (PendingError is not { } pendingError)
         {
             return false;
         }
 
         ClearPendingError();
+        RaiseProcessed(new ScanOutcome.Cancelled(pendingError.RawCode));
         return true;
     }
 

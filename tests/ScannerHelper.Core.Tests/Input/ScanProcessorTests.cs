@@ -2,7 +2,7 @@
 // ScanProcessorTests.cs
 //
 // 中文：
-//   一次扫描进来之后发生的全部事情（架构变更后，用例编号 SP1~SP15）。
+//   一次扫描进来之后发生的全部事情（架构变更后，用例编号 SP1~SP17）。
 //
 //   ★ 本组是架构变更之后**唯一**的输入状态机测试，因为状态机只剩这一半了。
 //
@@ -26,7 +26,7 @@
 //          时网页收到的回车是 0 而不是「少了一个」。
 //
 // English:
-//   Everything that happens once a scan arrives (post-change; cases SP1–SP15).
+//   Everything that happens once a scan arrives (post-change; cases SP1–SP17).
 //
 //   This is the only input state-machine test group left, because only this half of the state
 //   machine remains. The other half — picking the scanner's characters out of the keyboard stream
@@ -60,6 +60,8 @@
 //   Paused_output_is_reported_as_its_own_outcome            SP13
 //   Updating_rules_keeps_a_pending_error                    SP14
 //   A_new_processor_is_never_paused                         SP15
+//   Force_send_is_recorded_as_its_own_outcome               SP16
+//   Cancel_is_recorded_as_its_own_outcome                   SP17
 // =============================================================================
 
 using ScannerHelper.Core.Domain;
@@ -388,6 +390,62 @@ public class ScanProcessorTests
 
         Assert.False(processor.IsPaused);
         Assert.Equal(ScanPipelineState.Idle, processor.State);
+    }
+
+    [Fact] // SP16
+    public void Force_send_is_recorded_as_its_own_outcome()
+    {
+        var outcomes = new List<ScanOutcome>();
+        _modeManager.SetMode(ScanMode.Sku);
+        var processor = CreateProcessor(
+            validator: SkuValidatorFactory.Create(new SkuValidationSettings
+            {
+                MinimumLength = 99,
+            }));
+        processor.ScanProcessed += (_, args) => outcomes.Add(args.Outcome);
+
+        processor.OnScanReceived(RawCode);
+        Assert.True(processor.ForceSend());
+
+        // ★ 强制发送是产品里唯一一个「明知有问题还是发出去」的动作，因此是最需要
+        //   留痕的一次输出。不记录的话，记录里就是「失败、什么都没发」之后直接跳到
+        //   下一枪，中间那次绕过规则的发送无迹可寻——规格 §19.1 的「静默的错误
+        //   数据」，具体形态就是这个。
+        // Force Send is the one action that emits something already known to be questionable, and
+        // therefore the output most in need of a record. Unrecorded, the trail shows a failure that
+        // emitted nothing followed by the next scan, with the rule-bypassing emission between them
+        // leaving no trace — the concrete shape of spec §19.1's silently wrong data.
+        Assert.Collection(
+            outcomes,
+            first => Assert.IsType<ScanOutcome.ValidationFailed>(first),
+            second => Assert.Equal(RawCode, Assert.IsType<ScanOutcome.ForceSent>(second).RawCode));
+    }
+
+    [Fact] // SP17
+    public void Cancel_is_recorded_as_its_own_outcome()
+    {
+        var outcomes = new List<ScanOutcome>();
+        _modeManager.SetMode(ScanMode.Sku);
+        var processor = CreateProcessor(
+            validator: SkuValidatorFactory.Create(new SkuValidationSettings
+            {
+                MinimumLength = 99,
+            }));
+        processor.ScanProcessed += (_, args) => outcomes.Add(args.Outcome);
+
+        processor.OnScanReceived(RawCode);
+        Assert.True(processor.Cancel());
+
+        // 取消意味着一枪数据没有进系统。工人多半会重扫，但如果他没有，那件货就漏了；
+        // 事后能看出「这里有一枪被丢掉了」，比看不出来强得多。
+        // A cancellation means one scan never reached the system. The operator usually rescans, but
+        // if they do not the item is simply missed, and seeing that afterwards beats not seeing it.
+        Assert.Collection(
+            outcomes,
+            first => Assert.IsType<ScanOutcome.ValidationFailed>(first),
+            second => Assert.Equal(RawCode, Assert.IsType<ScanOutcome.Cancelled>(second).RawCode));
+
+        Assert.True(_output.EmittedNothing);
     }
 
     /// <summary>

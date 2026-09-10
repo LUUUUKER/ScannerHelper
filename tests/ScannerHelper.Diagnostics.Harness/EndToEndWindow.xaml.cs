@@ -215,6 +215,12 @@ public partial class EndToEndWindow : Window
                 validationFailed.RawCode,
                 $"校验失败 / validation failed：{validationFailed.Sku}"),
 
+            ScanOutcome.ForceSent forced => (
+                forced.RawCode, "★ 强制发送 / force-sent（绕过了规则）"),
+
+            ScanOutcome.Cancelled cancelled => (
+                cancelled.RawCode, "已取消，未发出 / cancelled, nothing sent"),
+
             ScanOutcome.ScanFailed failed => (
                 failed.Failure.PartialRawCode, $"扫描未完成 / incomplete：{failed.Failure.Reason}"),
 

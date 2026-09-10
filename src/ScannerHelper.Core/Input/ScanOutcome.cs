@@ -131,6 +131,51 @@ public abstract record ScanOutcome
     /// English: SKU parsing failed. Enters the pending-error state to await F10 or Esc
     ///          (spec §10).
     /// </summary>
+    /// <summary>
+    /// 中文：
+    ///   工人按下强制发送，原始码被发了出去（规格 §10）。
+    ///
+    ///   ★ 它必须是一条独立的、看得见的结局，不能只是"待决错误消失了"。
+    ///
+    ///     强制发送是整个产品里唯一一个**明知有问题还是发出去**的动作：解析或校验
+    ///     已经说这个码不对，工人判断它其实是对的，于是绕过规则。那正是最需要留痕
+    ///     的一次输出——事后追查"这条错数据是怎么进系统的"，答案往往就在这里。
+    ///
+    ///     不记录的后果不是少了一行日志，而是那次输出**在记录里根本不存在**：
+    ///     列表上前一枪失败、什么都没发，下一枪一切正常，中间那次绕过规则的发送
+    ///     无迹可寻。规格 §19.1 说的"静默的错误数据"，具体形态就是这个。
+    /// English:
+    ///   The operator pressed Force Send and the raw code was emitted (spec §10).
+    ///
+    ///   It must be a visible outcome of its own rather than merely "the pending error went away".
+    ///   Force Send is the one action in this product that emits something already known to be
+    ///   questionable: parsing or validation said the code was wrong, the operator judged
+    ///   otherwise, and the rules were bypassed. That is the single output most in need of a
+    ///   record — "how did this bad row get into the system" is usually answered here.
+    ///
+    ///   Without it the emission does not merely lack a log line; it does not exist in the record
+    ///   at all: the list shows a failed scan that emitted nothing, then a normal one, with the
+    ///   rule-bypassing emission between them leaving no trace. That is the concrete shape of spec
+    ///   §19.1's silently wrong data.
+    /// </summary>
+    public sealed record ForceSent(string RawCode) : ScanOutcome;
+
+    /// <summary>
+    /// 中文：
+    ///   工人按下取消，那一枪被丢弃，什么都没发（规格 §10）。
+    ///
+    ///   ★ 「什么都没发」同样值得记一行。取消意味着一枪数据没有进系统，而工人
+    ///     多半会重扫一次——但如果他没有，那件货就漏了。事后看列表能看出
+    ///     "这里有一枪被丢掉了"，比看不出来强得多。
+    /// English:
+    ///   The operator pressed Cancel; the scan was discarded and nothing was emitted (spec §10).
+    ///
+    ///   "Nothing was emitted" deserves a line too. A cancellation means one scan did not reach the
+    ///   system, and the operator will usually rescan — but if they do not, that item is simply
+    ///   missed. Seeing "a scan was discarded here" afterwards beats not seeing it.
+    /// </summary>
+    public sealed record Cancelled(string RawCode) : ScanOutcome;
+
     public sealed record ParseFailed(ParseResult.Failure Failure) : ScanOutcome;
 
     /// <summary>
