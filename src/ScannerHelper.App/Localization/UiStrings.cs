@@ -1,0 +1,293 @@
+// =============================================================================
+// UiStrings.cs
+//
+// 中文：
+//   两种语言的全部界面文字（规格 §12：英语 en-US 与简体中文 zh-CN）。
+//
+//   ★ 为什么用代码里的字典，而不是 .resx。
+//
+//     规格 §12 写的是"全部用户可见文字必须来自资源文件，**或等价的按语言组织
+//     的方式**"，并且要求"切换语言立即生效、不重启"。WPF 里 .resx 的标准绑定
+//     方式是 x:Static，而 x:Static 是一次性求值的——要做到立即生效，仍然要在
+//     它之上再搭一层会通知变更的东西。既然那一层无论如何都要有，就让它直接
+//     持有字典，少一层间接。
+//
+//     真正的要求是"视图和服务里不出现硬编码的中英文"，这一点由本文件是**唯一**
+//     的文字来源来保证。
+//
+//   ★ 两张表的键必须完全一致，由构造时的自检钉住。
+//
+//     少一个键的表现是界面上出现一个键名（例如 "ModeSnSubtitle"），而它多半
+//     只在另一种语言下、只在某个不常走的分支里出现——现场看到的是一个莫名其妙
+//     的英文单词，而开发机上一切正常。让它在启动时就炸，比让工人在货架前看到
+//     一个键名要好。
+//
+//   ★ SN 与 SKU 在两种语言里都不翻译（规格 §12「术语」）。
+//
+//     它们是仓库里天天说的词，翻译过来反而没人认得。
+//
+// English:
+//   Every UI string in both languages (spec §12: en-US and zh-CN).
+//
+//   Dictionaries in code rather than .resx: spec §12 asks for resource files "or equivalent
+//   culture-specific organization" and requires language changes to apply immediately without a
+//   restart. WPF's standard .resx binding is x:Static, which evaluates once, so achieving live
+//   switching needs a change-notifying layer on top regardless — and since that layer must exist,
+//   letting it hold the dictionaries directly removes an indirection. The real requirement is that
+//   no Chinese or English text is hardcoded in views or services, which holds because this file is
+//   the single source of it.
+//
+//   The two tables must carry identical keys, checked at construction. A missing key shows up as a
+//   key name on screen ("ModeSnSubtitle"), usually only in one language and only down some rarely
+//   taken branch — the floor sees a nonsensical English word while the development machine looks
+//   fine. Failing at startup beats an operator reading a key name in front of the racks.
+//
+//   SN and SKU stay untranslated in both languages (spec §12, Terminology): they are what the
+//   warehouse says every day, and translating them would make them unrecognizable.
+//
+// 包含的类型 / Types in this file:
+//   UiLanguage
+//   UiStrings
+// =============================================================================
+
+namespace ScannerHelper.App.Localization;
+
+/// <summary>
+/// 中文：V1 支持的两种语言（规格 §12）。
+/// English: The two languages V1 supports (spec §12).
+/// </summary>
+public enum UiLanguage
+{
+    /// <summary>中文：英语。 English: English (en-US).</summary>
+    English,
+
+    /// <summary>中文：简体中文。 English: Simplified Chinese (zh-CN).</summary>
+    ChineseSimplified,
+}
+
+/// <summary>
+/// 中文：两种语言的文字表。
+/// English: The string tables for both languages.
+/// </summary>
+public static class UiStrings
+{
+    private static readonly Dictionary<string, string> English = new(StringComparer.Ordinal)
+    {
+        ["AppTitle"] = "Scanner Helper",
+
+        ["ModeHeading"] = "CURRENT MODE",
+        ["ModeSn"] = "SN MODE",
+        ["ModeSku"] = "SKU MODE",
+        ["ModeSnSubtitle"] = "The scanned code is sent as-is",
+        ["ModeSkuSubtitle"] = "The SKU is extracted from the scanned code",
+        ["SwitchModeHint"] = "F8   Switch mode",
+        ["SwitchMode"] = "Switch mode",
+
+        ["Connected"] = "✓  Scanner connected",
+        ["Disconnected"] = "⛔  Scanner not connected",
+        ["ConnectedOn"] = "✓  Scanner connected on {0}",
+        ["Connect"] = "Connect",
+        ["Disconnect"] = "Disconnect",
+
+        ["LastScan"] = "Last scan",
+        ["NoScanYet"] = "Nothing scanned yet",
+
+        ["Pause"] = "Pause",
+        ["Resume"] = "Resume",
+        ["PausedHeading"] = "PAUSED",
+
+        // ★ 措辞必须匹配决策 D-26 的新语义，不能沿用规格 §11.1 里那句
+        //   "passes through untouched"——那描述的是旧架构（钩子放行一切）。
+        //   现在暂停的意思是"跳过规则、原样发出"，两者对工人的含义不同。
+        // The wording must match decision D-26's new semantics rather than spec §11.1's "passes
+        // through untouched", which described the old architecture where the hook let everything
+        // by. Pausing now means "skip the rules and send it unchanged", which means something
+        // different to the operator.
+        ["PausedSubtitle"] = "Scans are sent unchanged, without parsing or validation",
+        ["ModeOnResume"] = "Mode on resume",
+
+        ["ErrorHeading"] = "⚠  SCAN NOT SENT",
+        ["ErrorParse"] = "The SKU rule did not match this code",
+        ["ErrorValidation"] = "The extracted SKU failed validation",
+        ["ErrorPrompt"] = "Send it as scanned, or discard it?",
+        ["ForceSend"] = "Send as scanned  (F10)",
+        ["DiscardScan"] = "Discard  (Esc)",
+
+        ["Settings"] = "Settings",
+        ["Pin"] = "Keep on top",
+        ["Unpin"] = "Stop keeping on top",
+        ["Compact"] = "Compact",
+        ["Expand"] = "Expand",
+        ["Close"] = "Close",
+
+        ["ExitTitle"] = "Exit Scanner Helper?",
+        ["ExitMessage"] =
+            "Scans will no longer be processed after this. "
+            + "To hide the window instead, use Compact.",
+        ["ExitConfirm"] = "Exit",
+        ["ExitCancel"] = "Keep running",
+
+        ["LinkSilent"] =
+            "No scan for {0} minutes. Check that the scanner is still in virtual COM mode — "
+            + "if it was switched back to keyboard mode it types directly into the business "
+            + "application and nothing here reports an error.",
+
+        ["SettingsTitle"] = "Settings",
+        ["SettingsLanguage"] = "Language",
+        ["SettingsScanner"] = "Scanner",
+        ["SettingsPort"] = "Port",
+        ["SettingsBaud"] = "Baud rate",
+        ["SettingsRefreshPorts"] = "Refresh",
+        ["SettingsSkuRule"] = "SKU rule",
+        ["SettingsRuleFixed"] = "Fixed position",
+        ["SettingsRuleRegex"] = "Regular expression",
+        ["SettingsStartPosition"] = "Start position",
+        ["SettingsLength"] = "Length",
+        ["SettingsRegexPattern"] = "Pattern",
+        ["SettingsCaptureGroup"] = "Capture group",
+        ["SettingsOutput"] = "Output",
+        ["SettingsAppendEnter"] = "Press Enter after each scan",
+        ["SettingsAppendEnterHint"] =
+            "Off by default. Turn it on only if the page needs Enter to submit or move on.",
+        ["SettingsStartWithWindows"] = "Start with Windows",
+        ["SettingsSave"] = "Save",
+        ["SettingsCancel"] = "Cancel",
+        ["SettingsTest"] = "Test with the last scan",
+        ["SettingsTestNoScan"] = "Scan something first.",
+        ["SettingsTestResult"] = "Result: {0}",
+        ["SettingsTestFailed"] = "This rule does not match: {0}",
+
+        ["AlreadyRunningTitle"] = "Scanner Helper is already running",
+        ["AlreadyRunningMessage"] =
+            "Only one copy can run at a time, because only one can hold the scanner's port.",
+
+        ["PortBusyTitle"] = "The port is in use",
+        ["PortMissingTitle"] = "The port was not found",
+    };
+
+    private static readonly Dictionary<string, string> ChineseSimplified = new(StringComparer.Ordinal)
+    {
+        ["AppTitle"] = "扫码助手",
+
+        ["ModeHeading"] = "当前模式",
+        ["ModeSn"] = "SN MODE",
+        ["ModeSku"] = "SKU MODE",
+        ["ModeSnSubtitle"] = "扫到的码原样发出",
+        ["ModeSkuSubtitle"] = "从扫到的码里提取 SKU",
+        ["SwitchModeHint"] = "F8   切换模式",
+        ["SwitchMode"] = "切换模式",
+
+        ["Connected"] = "✓  扫码枪已连接",
+        ["Disconnected"] = "⛔  扫码枪未连接",
+        ["ConnectedOn"] = "✓  扫码枪已连接（{0}）",
+        ["Connect"] = "连接",
+        ["Disconnect"] = "断开",
+
+        ["LastScan"] = "最近一枪",
+        ["NoScanYet"] = "还没有扫过",
+
+        ["Pause"] = "暂停",
+        ["Resume"] = "恢复",
+        ["PausedHeading"] = "已暂停",
+        ["PausedSubtitle"] = "扫到的码原样发出，不做解析与校验",
+        ["ModeOnResume"] = "恢复后的模式",
+
+        ["ErrorHeading"] = "⚠  这一枪没有发出",
+        ["ErrorParse"] = "SKU 规则匹配不上这个码",
+        ["ErrorValidation"] = "提取出来的 SKU 没通过校验",
+        ["ErrorPrompt"] = "按原样发出去，还是丢弃？",
+        ["ForceSend"] = "原样发出  (F10)",
+        ["DiscardScan"] = "丢弃  (Esc)",
+
+        ["Settings"] = "设置",
+        ["Pin"] = "始终置顶",
+        ["Unpin"] = "取消置顶",
+        ["Compact"] = "收起",
+        ["Expand"] = "展开",
+        ["Close"] = "关闭",
+
+        ["ExitTitle"] = "要退出扫码助手吗？",
+        ["ExitMessage"] = "退出之后扫码将不再被处理。只是想让窗口小一点的话，请用「收起」。",
+        ["ExitConfirm"] = "退出",
+        ["ExitCancel"] = "继续运行",
+
+        ["LinkSilent"] =
+            "已经 {0} 分钟没有收到扫码了。请确认扫码枪还在虚拟串口模式——"
+            + "若它被切回了键盘模式，它会直接往业务软件里打字，而这里不会报任何错。",
+
+        ["SettingsTitle"] = "设置",
+        ["SettingsLanguage"] = "语言",
+        ["SettingsScanner"] = "扫码枪",
+        ["SettingsPort"] = "端口",
+        ["SettingsBaud"] = "波特率",
+        ["SettingsRefreshPorts"] = "重新列出",
+        ["SettingsSkuRule"] = "SKU 规则",
+        ["SettingsRuleFixed"] = "固定位置",
+        ["SettingsRuleRegex"] = "正则表达式",
+        ["SettingsStartPosition"] = "起始位",
+        ["SettingsLength"] = "长度",
+        ["SettingsRegexPattern"] = "表达式",
+        ["SettingsCaptureGroup"] = "捕获组",
+        ["SettingsOutput"] = "输出",
+        ["SettingsAppendEnter"] = "每枪之后按一次回车",
+        ["SettingsAppendEnterHint"] = "默认关闭。只有当网页需要回车才提交或跳到下一格时才打开。",
+        ["SettingsStartWithWindows"] = "开机自动启动",
+        ["SettingsSave"] = "保存",
+        ["SettingsCancel"] = "取消",
+        ["SettingsTest"] = "用最近一枪试一下",
+        ["SettingsTestNoScan"] = "先扫一枪。",
+        ["SettingsTestResult"] = "结果：{0}",
+        ["SettingsTestFailed"] = "这条规则匹配不上：{0}",
+
+        ["AlreadyRunningTitle"] = "扫码助手已经在运行",
+        ["AlreadyRunningMessage"] = "同一时刻只能开一个，因为扫码枪的串口只能被一个程序占用。",
+
+        ["PortBusyTitle"] = "端口被占用",
+        ["PortMissingTitle"] = "找不到这个端口",
+    };
+
+    /// <summary>
+    /// 中文：
+    ///   静态构造：核对两张表的键完全一致。
+    ///   不一致就在启动时抛异常——理由见文件头。
+    /// English:
+    ///   Static construction checks that both tables carry identical keys, throwing at startup if
+    ///   not; see the file header for why.
+    /// </summary>
+    static UiStrings()
+    {
+        var onlyInEnglish = English.Keys.Except(ChineseSimplified.Keys).ToArray();
+        var onlyInChinese = ChineseSimplified.Keys.Except(English.Keys).ToArray();
+
+        if (onlyInEnglish.Length > 0 || onlyInChinese.Length > 0)
+        {
+            throw new InvalidOperationException(
+                "两种语言的文字表键不一致。 The two language tables have different keys."
+                + $" 只在英文表里 / English only: [{string.Join(", ", onlyInEnglish)}]"
+                + $" 只在中文表里 / Chinese only: [{string.Join(", ", onlyInChinese)}]");
+        }
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   取一条文字。
+    ///   输入：language 语言；key 键。
+    ///   输出：对应的文字；键不存在时返回键名本身。
+    ///
+    ///   ★ 键不存在时返回键名，而不是抛异常或返回空串。界面上出现一个键名很难看，
+    ///     但它**指名道姓地告诉你缺了哪一条**；空串会让那处控件看起来只是空着，
+    ///     而抛异常会因为一句文案让整个程序倒下——工人正在扫货，程序不该为一句
+    ///     文案罢工。
+    /// English:
+    ///   Returns one string, or the key itself when it is missing.
+    ///
+    ///   The key rather than an exception or an empty string: a key on screen is ugly but it names
+    ///   exactly what is missing, an empty string makes the control merely look blank, and throwing
+    ///   would take the whole program down over a caption while the operator is scanning goods.
+    /// </summary>
+    public static string Get(UiLanguage language, string key)
+    {
+        var table = language == UiLanguage.ChineseSimplified ? ChineseSimplified : English;
+        return table.TryGetValue(key, out var value) ? value : key;
+    }
+}

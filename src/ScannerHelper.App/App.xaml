@@ -1,0 +1,89 @@
+<Application x:Class="ScannerHelper.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Startup="OnStartup"
+             Exit="OnExit">
+    <Application.Resources>
+
+        <!--
+            中文：
+              规格 §11.2 的状态色板。五种状态各有一个颜色，**且每一种都另有一个
+              不依赖颜色的标志**——大号文字、图标、条纹。
+
+              ★ 颜色只能是补充线索，不能是唯一线索。
+                红绿色觉障碍在男性中约占 8%，而 SN / SKU 是工人一天里要判断几百次
+                的区分；仓库里那种发白的低对比屏幕更会把浅色方案吃掉。所以绿蓝配对
+                （在常见色觉障碍下仍可分辨）、深而不艳（八小时不刺眼）、灰色表示
+                "没有在处理"（靠饱和度区分，任何色觉障碍下都成立）。
+
+              ★ 绿色被 SN 占用了，因此连接状态**不能**用绿点。
+                一个绿色的"已连接"指示灯挨着一个绿色的"SN MODE"面板，等于给同一种
+                颜色安了两个互不相干的含义。用 ✓ 加中性色的文字。
+            English:
+              Spec §11.2's state palette. Five states each carry a color, and each also carries a
+              non-color signature — large text, a glyph, a stripe.
+
+              Color may only be a supporting cue. Red-green color-vision deficiency affects about
+              8% of men, and SN versus SKU is a distinction the operator makes hundreds of times a
+              day; the washed-out low-contrast panels common on warehouse workstations swallow
+              light schemes entirely. Hence green paired with blue (separable under the common
+              deficiencies), deep rather than vivid (easy on the eyes across an eight-hour shift),
+              and grey for "nothing is being processed" (a saturation difference, which holds under
+              every form of color blindness).
+
+              Green belongs to SN, so the connection indicator must not be a green dot: a green
+              "connected" light beside a green "SN MODE" panel gives one color two unrelated
+              meanings. A ✓ glyph with neutral text instead.
+        -->
+
+        <SolidColorBrush x:Key="SnBrush" Color="#1B7A3D" />
+        <SolidColorBrush x:Key="SkuBrush" Color="#1B5FA8" />
+        <SolidColorBrush x:Key="ErrorBrush" Color="#B3261E" />
+        <SolidColorBrush x:Key="PausedBrush" Color="#414B56" />
+        <SolidColorBrush x:Key="DisconnectedBrush" Color="#414B56" />
+        <SolidColorBrush x:Key="OnStateBrush" Color="#FFFFFF" />
+        <SolidColorBrush x:Key="ChromeBrush" Color="#F2F2F2" />
+        <SolidColorBrush x:Key="ChromeTextBrush" Color="#222222" />
+        <SolidColorBrush x:Key="MutedTextBrush" Color="#5A5A5A" />
+
+        <Style x:Key="StateHeading" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource OnStateBrush}" />
+            <Setter Property="FontSize" Value="15" />
+            <Setter Property="Opacity" Value="0.85" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+        </Style>
+
+        <!--
+            中文：模式名是界面上最大的元素（规格 §11.1）。工人隔着一两米、
+                  低头搬货的间隙抬眼一看就要认出来，所以它必须大到不用聚焦。
+            English: The mode name is the largest element (spec §11.1): the operator glances up
+                     from a metre or two away between lifting boxes, so it must be legible without
+                     focusing.
+        -->
+        <Style x:Key="StateTitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource OnStateBrush}" />
+            <Setter Property="FontSize" Value="46" />
+            <Setter Property="FontWeight" Value="Bold" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Center" />
+        </Style>
+
+        <Style x:Key="StateSubtitle" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource OnStateBrush}" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Opacity" Value="0.9" />
+            <Setter Property="HorizontalAlignment" Value="Center" />
+            <Setter Property="TextAlignment" Value="Center" />
+            <Setter Property="TextWrapping" Value="Wrap" />
+            <Setter Property="Margin" Value="16,6,16,0" />
+        </Style>
+
+        <Style x:Key="ActionButton" TargetType="Button">
+            <Setter Property="Height" Value="38" />
+            <Setter Property="MinWidth" Value="120" />
+            <Setter Property="FontSize" Value="14" />
+            <Setter Property="Padding" Value="14,0" />
+        </Style>
+
+    </Application.Resources>
+</Application>

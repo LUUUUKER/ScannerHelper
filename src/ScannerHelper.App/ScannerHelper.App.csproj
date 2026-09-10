@@ -1,0 +1,51 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    中文：
+      正式的桌面程序（规格 §16）。它是工人真正会看到的那个东西，因此这里的
+      每一条设置都直接对应规格里的一条要求。
+
+      ★ 绝不请求提权（规格 §2.1 假设 A2）。业务软件以普通权限运行，本程序必须
+        与之同级——权限更高的话，SendInput 发出去的内容会被 UIPI 挡在门外，
+        表现是"扫了码什么都没发生"而日志一片正常。
+
+      不引用任何第三方界面库：仓库 IT 按哈希把可执行文件加进白名单（规格 §22.1），
+      依赖越少，发布件越容易解释，也越容易复现同一个哈希。
+    English:
+      The real desktop application (spec §16) — what the operator actually sees, so every
+      setting here answers a requirement in the spec.
+
+      It never requests elevation (spec §2.1, assumption A2): the business application runs
+      unelevated and this must match, since running higher lets UIPI block our SendInput,
+      presenting as "scanning did nothing" with a perfectly normal log.
+
+      No third-party UI libraries: warehouse IT allow-lists the executable by hash (spec §22.1),
+      and fewer dependencies make the artifact easier to explain and to reproduce bit for bit.
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+
+    <AssemblyName>ScannerHelper</AssemblyName>
+    <RootNamespace>ScannerHelper.App</RootNamespace>
+
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+
+    <!--
+      中文：界面文字全部来自本地化表，不随系统区域变化而改变格式化行为。
+      English: All UI text comes from the localization tables; formatting does not follow the
+               system locale.
+    -->
+    <InvariantGlobalization>false</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ScannerHelper.Core\ScannerHelper.Core.csproj" />
+    <ProjectReference Include="..\ScannerHelper.Win32\ScannerHelper.Win32.csproj" />
+  </ItemGroup>
+
+</Project>

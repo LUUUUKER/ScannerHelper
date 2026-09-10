@@ -1,0 +1,82 @@
+<Window x:Class="ScannerHelper.App.CompactWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:loc="clr-namespace:ScannerHelper.App.Localization"
+        Title="{Binding Source={x:Static loc:Localizer.Strings}, Path=[AppTitle]}"
+        Width="300" Height="132"
+        ResizeMode="NoResize"
+        ShowInTaskbar="True"
+        WindowStyle="ToolWindow"
+        Topmost="True"
+        Loaded="OnLoaded"
+        Closing="OnClosing">
+
+    <!--
+        中文：
+          Compact 窗口（规格 §11.3、§11.4）。
+
+          ★ 恒置顶（规格 §11.4）。它小到不挡事，而它存在的全部意义就是"抬眼就能
+            看到现在是什么模式"。被业务软件盖住的置顶窗口等于没有。
+
+          ★ 暂停按钮在这里**也必须有**（规格 §5.7：Full 和 Compact 都要鼠标可达）。
+            安全阀只在某一个视图里能点，等于工人得先想起来切视图——而需要它的时候
+            往往正是最慌的时候。
+
+          ★ ShowInTaskbar 为 true。规格 §11.3 要求"绝不最小化到看不见的状态"：
+            任务栏上那一项是工人找回它的最后一条路。
+        English:
+          The Compact window (spec §11.3, §11.4).
+
+          Always topmost (spec §11.4): it is small enough not to be in the way, and its entire
+          purpose is that a glance shows the current mode. A topmost window covered by the business
+          application would be no window at all.
+
+          The Pause button must be here too (spec §5.7 requires mouse reachability from both Full
+          and Compact). A valve available in only one view makes the operator remember to switch
+          views first — and the moment they need it is usually the moment they are flustered.
+
+          ShowInTaskbar stays true: spec §11.3 forbids minimizing into invisibility, and the
+          taskbar entry is the operator's last route back to it.
+    -->
+
+    <Border x:Name="StatePanel" Background="{StaticResource SnBrush}">
+        <Grid>
+            <Border x:Name="HazardStripe" Height="6" VerticalAlignment="Top" Visibility="Collapsed">
+                <Border.Background>
+                    <DrawingBrush TileMode="Tile" Viewport="0,0,14,14" ViewportUnits="Absolute">
+                        <DrawingBrush.Drawing>
+                            <GeometryDrawing Brush="#FFFFFF">
+                                <GeometryDrawing.Geometry>
+                                    <PathGeometry Figures="M0,14 L7,0 L14,0 L7,14 Z" />
+                                </GeometryDrawing.Geometry>
+                            </GeometryDrawing>
+                        </DrawingBrush.Drawing>
+                    </DrawingBrush>
+                </Border.Background>
+            </Border>
+
+            <Border x:Name="DisconnectedBar" Height="5" VerticalAlignment="Top"
+                    Background="#B3261E" Visibility="Collapsed" />
+
+            <DockPanel Margin="10,12,10,10">
+                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
+                            HorizontalAlignment="Center" Margin="0,8,0,0">
+                    <Button x:Name="PauseButton" Height="26" MinWidth="94" FontSize="12"
+                            Click="OnPauseClicked" />
+                    <Button x:Name="ExpandButton" Height="26" MinWidth="94" FontSize="12"
+                            Margin="8,0,0,0" Click="OnExpandClicked"
+                            Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[Expand]}" />
+                </StackPanel>
+
+                <StackPanel VerticalAlignment="Center">
+                    <TextBlock x:Name="StateTitleText" Foreground="{StaticResource OnStateBrush}"
+                               FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"
+                               TextAlignment="Center" />
+                    <TextBlock x:Name="StateSubtitleText" Foreground="{StaticResource OnStateBrush}"
+                               FontSize="11" Opacity="0.9" HorizontalAlignment="Center"
+                               TextAlignment="Center" TextWrapping="Wrap" Margin="6,2,6,0" />
+                </StackPanel>
+            </DockPanel>
+        </Grid>
+    </Border>
+</Window>
