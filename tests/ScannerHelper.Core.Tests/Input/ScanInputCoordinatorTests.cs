@@ -60,6 +60,7 @@ public class ScanInputCoordinatorTests
     private readonly TestSystemClock _clock = new();
     private readonly ModeManager _modeManager = new();
 
+    private readonly RecordingKeyboardOutputService _output = new();
     private readonly List<ScanOutcome> _outcomes = [];
     private readonly List<KeyEvent> _replayed = [];
 
@@ -76,7 +77,8 @@ public class ScanInputCoordinatorTests
             {
                 RuleType = SkuParsingRuleType.FixedPosition, StartPosition = 5, Length = 8,
             }),
-            validator ?? SkuValidatorFactory.Create(new SkuValidationSettings()));
+            validator ?? SkuValidatorFactory.Create(new SkuValidationSettings()),
+            _output);
 
         coordinator.ScanProcessed += (_, args) => _outcomes.Add(args.Outcome);
         coordinator.ReplayRequested += (_, args) => _replayed.Add(args.KeyEvent);
@@ -525,19 +527,27 @@ public class ScanInputCoordinatorTests
         var validator = SkuValidatorFactory.Create(new SkuValidationSettings());
 
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            null!, session, _modeManager, parser, validator));
+            null!, session, _modeManager, parser, validator, _output));
 
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            correlator, null!, _modeManager, parser, validator));
+            correlator, null!, _modeManager, parser, validator, _output));
 
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            correlator, session, null!, parser, validator));
+            correlator, session, null!, parser, validator, _output));
 
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            correlator, session, _modeManager, null!, validator));
+            correlator, session, _modeManager, null!, validator, _output));
 
         Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
-            correlator, session, _modeManager, parser, null!));
+            correlator, session, _modeManager, parser, null!, _output));
+
+        // 输出服务同样必填。缺了它，一枪扫完之后没有任何东西能到达业务软件，
+        // 而界面照样报告成功——规格 §19.1 说的正是这种"看起来在工作"的失效。
+        // The output service is required too. Without it nothing reaches the business
+        // application after a scan while the UI still reports success — spec §19.1's
+        // "looks like it is working" failure exactly.
+        Assert.Throws<ArgumentNullException>(() => new ScanInputCoordinator(
+            correlator, session, _modeManager, parser, validator, null!));
     }
 
     /// <summary>

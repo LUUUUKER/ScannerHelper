@@ -79,6 +79,7 @@
 
 using ScannerHelper.Core.Domain;
 using ScannerHelper.Core.Modes;
+using ScannerHelper.Core.Output;
 using ScannerHelper.Core.Parsing;
 using ScannerHelper.Core.Validation;
 
@@ -174,6 +175,7 @@ public sealed class ScanInputCoordinator
     private readonly IInputEventCorrelator _correlator;
     private readonly ScanSession _session;
     private readonly ModeManager _modeManager;
+    private readonly IKeyboardOutputService _output;
 
     /// <summary>
     /// 中文：
@@ -204,20 +206,58 @@ public sealed class ScanInputCoordinator
         ScanSession session,
         ModeManager modeManager,
         ISkuParser skuParser,
-        ISkuValidator skuValidator)
+        ISkuValidator skuValidator,
+        IKeyboardOutputService output)
     {
         ArgumentNullException.ThrowIfNull(correlator);
         ArgumentNullException.ThrowIfNull(session);
         ArgumentNullException.ThrowIfNull(modeManager);
         ArgumentNullException.ThrowIfNull(skuParser);
         ArgumentNullException.ThrowIfNull(skuValidator);
+        ArgumentNullException.ThrowIfNull(output);
 
         _correlator = correlator;
         _session = session;
         _modeManager = modeManager;
+        _output = output;
         SkuParser = skuParser;
         SkuValidator = skuValidator;
     }
+
+    /// <summary>
+    /// 中文：
+    ///   扫描后是否自动补一个回车，**默认关闭**（决策 D-10、规格 §10）。
+    ///
+    ///   ★ 默认关闭意味着网页收到的回车数是 **0**，而不是"少了一个"。
+    ///
+    ///     整段原始扫描都被吞掉，扫码枪自带的那个终止回车也不例外。所以
+    ///     关掉这个开关时，网页从一次扫描里得到的回车是零。规格 §10 特意
+    ///     点明了这一点，因为条码录入的网页表单**很常见地**靠回车提交或
+    ///     跳到下一个字段——而这个页面到底靠不靠，在拿到真实页面之前无从
+    ///     知道。
+    ///
+    ///   做成设置项而不是常量，代价是一个布尔和一个分支，换来的是这个答案
+    ///   能在试点当天现场切换，而不必改代码、重新构建、重新部署。规格把它
+    ///   称作"针对一个未知数的、刻意廉价的对冲"。
+    ///
+    ///   它对 SN 输出、SKU 输出、以及 F10 强制发送**一视同仁**。
+    /// English:
+    ///   Whether to append an Enter after a scan; off by default (decision D-10, spec §10).
+    ///
+    ///   Off means the page receives zero Enters from a scan, not one fewer. The entire raw
+    ///   scan is swallowed, the scanner's own terminating Enter included. Spec §10 makes the
+    ///   point explicitly because barcode entry in web forms very commonly relies on Enter to
+    ///   submit or to advance to the next field — and whether this page does cannot be known
+    ///   before the real page is in hand.
+    ///
+    ///   Making it a setting rather than a constant costs one boolean and one branch, and buys
+    ///   an answer that can be switched on the pilot floor in seconds instead of requiring a
+    ///   code change, a rebuild and a redeployment. The spec calls it a deliberately cheap
+    ///   hedge against an unknown.
+    ///
+    ///   It applies equally to SN output, SKU output and F10 Force Send.
+    /// </summary>
+    public bool AppendEnterAfterScan { get; set; }
 
     /// <summary>
     /// 中文：当前状态。
@@ -485,10 +525,93 @@ public sealed class ScanInputCoordinator
     }
 
     /// <summary>
-    /// 中文：清除待决错误，回到空闲。Task 7 的 F10 强制发送与 Esc 取消都会
-    ///       在处理完之后调用它（规格 §10：两者都要回到出错前的界面状态）。
-    /// English: Clears the pending error and returns to Idle. Task 7's Force Send and Cancel
-    ///          both call it after handling (spec §10: both return to the pre-error UI state).
+    /// 中文：
+    ///   强制发送（F10）：把出错那一枪的**原始码**原样发出去（规格 §10）。
+    ///   输入：无。
+    ///   输出：确实有待决错误并已发送返回 true；没有待决错误返回 false。
+    ///
+    ///   ★ 发的是**原始码**，不是解析出来的候选 SKU。
+    ///
+    ///     规格 §10 写得很直白："Force Send 始终发送原始扫描码，而不是部分
+    ///     解析出来的候选值。" 道理在于工人按 F10 的处境：他看到错误提示，
+    ///     并且判断"这个码本身是对的，是规则还没配好"。这时他想送出去的是
+    ///     他扫到的那个东西。发一个解析了一半的候选值，等于用一条他不信任的
+    ///     规则的中间产物去覆盖他的判断。
+    ///
+    ///   ★ 返回布尔而不是抛异常，是为了 Task 8 的热键路由。
+    ///
+    ///     规格 §7 的表格规定：F10 在有待决错误时**吞掉**，没有待决错误时
+    ///     **透传**。路由层需要知道"这次到底管没管用"才能决定吞还是放，
+    ///     而"没有待决错误时按 F10"是完全正常的操作，不是异常。
+    ///
+    ///   模式保持不变（规格 §10）：本方法完全不碰 ModeManager。
+    /// English:
+    ///   Force Send (F10): emits the failed scan's raw code exactly (spec §10). Returns true
+    ///   when a pending error existed and was sent, false when there was none.
+    ///
+    ///   It emits the raw code, not the parsed candidate. Spec §10 is blunt: "Force Send always
+    ///   emits the raw scanned code, not a partially parsed candidate." The reason lies in the
+    ///   operator's situation when they press F10 — they have read the error and judged that
+    ///   the code itself is right and the rule is not yet configured. What they want sent is
+    ///   what they scanned. Emitting a half-parsed candidate would override that judgement with
+    ///   an intermediate product of the very rule they do not trust.
+    ///
+    ///   Returning a boolean rather than throwing serves Task 8's hotkey routing: spec §7's
+    ///   table has F10 swallowed while an error is pending and passed through otherwise, so the
+    ///   routing layer needs to know whether it did anything — and pressing F10 with no pending
+    ///   error is entirely normal rather than exceptional.
+    ///
+    ///   The mode is preserved (spec §10): this method never touches ModeManager.
+    /// </summary>
+    public bool ForceSend()
+    {
+        if (PendingError is not { } pendingError)
+        {
+            return false;
+        }
+
+        Emit(pendingError.RawCode);
+        ClearPendingError();
+        return true;
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   取消（Esc）：什么都不发，丢弃这一枪（规格 §10）。
+    ///   输入：无。
+    ///   输出：确实有待决错误并已取消返回 true；没有待决错误返回 false。
+    ///
+    ///   返回布尔的理由与 ForceSend 相同，而且在 Esc 上更要紧：规格 §7 特意
+    ///   说明 Esc **不能无条件吞掉**——它在网页里太常用了，无条件吞会让工人
+    ///   发现"网页的取消键坏了"，却完全想不到是本程序所为。
+    ///
+    ///   模式保持不变（规格 §10）。
+    /// English:
+    ///   Cancel (Esc): emits nothing and discards the scan (spec §10). Returns true when a
+    ///   pending error existed and was cancelled, false when there was none.
+    ///
+    ///   The boolean matters more here than for F10: spec §7 specifically forbids swallowing
+    ///   Esc unconditionally, being far too common in web use — doing so would leave the
+    ///   operator with a "broken" cancel key and no reason to suspect this tool.
+    ///
+    ///   The mode is preserved (spec §10).
+    /// </summary>
+    public bool Cancel()
+    {
+        if (PendingError is null)
+        {
+            return false;
+        }
+
+        ClearPendingError();
+        return true;
+    }
+
+    /// <summary>
+    /// 中文：清除待决错误，回到空闲（规格 §10：强制发送与取消都要回到出错前
+    ///       的界面状态）。
+    /// English: Clears the pending error and returns to Idle (spec §10: both Force Send and
+    ///          Cancel return to the pre-error UI state).
     /// </summary>
     public void ClearPendingError()
     {
@@ -499,6 +622,47 @@ public sealed class ScanInputCoordinator
 
         PendingError = null;
         State = ScanPipelineState.Idle;
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   把内容送进业务软件。
+    ///   步骤：
+    ///     1. 原样发送文本；
+    ///     2. AppendEnterAfterScan 打开时，另外发一次回车。
+    ///
+    ///   ★ 步骤 2 用独立的 EmitEnter，而不是在文本末尾拼一个 '\r'。
+    ///
+    ///     以 Unicode 字符发出的 U+000D 是一个**字符**，而网页表单的提交行为
+    ///     通常挂在 Enter 的**按键事件**上。拼成字符发出去，很可能文本框里
+    ///     多了个看不见的字符而表单根本没提交——那个设置开了等于没开，
+    ///     现场还极难判断是设置没生效还是网页不认。详见 IKeyboardOutputService。
+    ///
+    ///   本方法是 SN 输出、SKU 输出、F10 强制发送共同的出口，因此那条设置
+    ///   对三者一视同仁（规格 §10 明确要求），不需要在三处各写一遍。
+    /// English:
+    ///   Delivers content to the business application: emit the text as given, then emit an
+    ///   Enter if AppendEnterAfterScan is on.
+    ///
+    ///   The Enter goes through EmitEnter rather than being appended to the text as '\r'.
+    ///   U+000D sent as a Unicode character is a *character*, while a web form's submit
+    ///   behavior normally hangs off the Enter *key event*; appending it tends to leave an
+    ///   invisible character in the field with the form not submitting — the setting enabled
+    ///   yet ineffective, and very hard on site to tell from a page that does not accept the
+    ///   input. See IKeyboardOutputService.
+    ///
+    ///   This is the single exit shared by SN output, SKU output and Force Send, which is what
+    ///   makes the setting apply equally to all three as spec §10 requires, without repeating
+    ///   the rule in three places.
+    /// </summary>
+    private void Emit(string text)
+    {
+        _output.EmitText(text);
+
+        if (AppendEnterAfterScan)
+        {
+            _output.EmitEnter();
+        }
     }
 
     /// <summary>
@@ -585,6 +749,7 @@ public sealed class ScanInputCoordinator
         if (_modeManager.CurrentMode == ScanMode.Sn)
         {
             State = ScanPipelineState.Idle;
+            Emit(rawCode);
             RaiseProcessed(new ScanOutcome.Emit(rawCode, rawCode));
             return;
         }
@@ -621,6 +786,7 @@ public sealed class ScanInputCoordinator
 
         // 步骤 5 / Step 5
         State = ScanPipelineState.Idle;
+        Emit(parsed.Sku);
         RaiseProcessed(new ScanOutcome.Emit(parsed.Sku, rawCode));
     }
 
