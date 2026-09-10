@@ -98,6 +98,32 @@ public abstract record ScanOutcome
     ///          the pending-error state and offers no F10: what is in hand is not a complete
     ///          barcode (spec §5.4).
     /// </summary>
+    /// <summary>
+    /// 中文：
+    ///   暂停期间原样发出的一枪（决策 D-26）。
+    ///
+    ///   ★ 它与 <see cref="Emit"/> 分开，而不是复用「输出内容等于原始码」那一种。
+    ///     两者发出去的字节可能完全一样，含义却相反：Emit 表示"按当前规则处理过，
+    ///     结论就是这个"，而这一种表示"**没有**按规则处理，因为现在处于暂停"。
+    ///
+    ///     合并的代价是界面再也分不清"SN 模式正常发出"和"暂停中绕过了规则"——
+    ///     而工人最需要看清的恰恰是后者：暂停是一个非常态，界面必须一直提醒它
+    ///     还开着，否则会有人在暂停状态下干一整天而不自知。
+    /// English:
+    ///   A scan emitted unchanged while paused (decision D-26).
+    ///
+    ///   Kept separate from <see cref="Emit"/> rather than reusing "output equals the raw code":
+    ///   the bytes may be identical while the meanings are opposite. Emit says "processed under
+    ///   the current rules, and this is the result"; this says "not processed at all, because we
+    ///   are paused".
+    ///
+    ///   Merging them would leave the UI unable to distinguish a normal SN emission from a paused
+    ///   bypass — and the bypass is precisely what the operator must see, PAUSED being an
+    ///   exceptional state that the UI has to keep announcing, or somebody works a whole shift in
+    ///   it without noticing.
+    /// </summary>
+    public sealed record EmitRawWhilePaused(string RawCode) : ScanOutcome;
+
     public sealed record ScanFailed(ScanResult.Failed Failure) : ScanOutcome;
 
     /// <summary>

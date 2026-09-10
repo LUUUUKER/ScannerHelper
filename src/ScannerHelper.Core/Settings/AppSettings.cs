@@ -103,6 +103,7 @@ namespace ScannerHelper.Core.Settings;
 public sealed class AppSettings
 {
     private HotkeySettings _hotkeys = new();
+    private SerialPortSettings _serialPort = new();
     private SkuParsingSettings _skuParsing = new();
     private SkuValidationSettings _skuValidation = new();
     private DiagnosticsSettings _diagnostics = new();
@@ -214,6 +215,28 @@ public sealed class AppSettings
     /// English: The bound scanner's identity; null when nothing is bound (spec §6).
     /// </summary>
     public ScannerBindingSettings? ScannerBinding { get; set; }
+
+    /// <summary>
+    /// 中文：
+    ///   扫码枪串口的连接参数（决策 D-27）。
+    ///
+    ///   ★ 与 <see cref="ScannerBinding"/> 是两件事，不要合并：这里是「怎么跟它说话」
+    ///     （波特率之类），那里是「它是谁」（VID/PID、序列号）。端口号会随插到哪个
+    ///     USB 口而变，所以重连要靠身份去找端口，而不是记住端口号
+    ///     （ARCHITECTURE_CHANGE_SERIAL.md §5.2）。
+    /// English:
+    ///   The scanner port's connection parameters (decision D-27).
+    ///
+    ///   A separate concern from <see cref="ScannerBinding"/> and not to be merged: this is how to
+    ///   talk to the device (baud rate and so on), that is who the device is (VID/PID, serial).
+    ///   Port numbers change with the USB socket used, so reconnection resolves the port from the
+    ///   identity rather than remembering a number (ARCHITECTURE_CHANGE_SERIAL.md §5.2).
+    /// </summary>
+    public SerialPortSettings SerialPort
+    {
+        get => _serialPort;
+        set => _serialPort = value ?? new SerialPortSettings();
+    }
 
     /// <summary>
     /// 中文：SKU 解析规则（规格 §8）。赋 null 会被折成默认实例，见文件头说明。
