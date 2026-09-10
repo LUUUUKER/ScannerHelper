@@ -91,7 +91,9 @@ public readonly record struct SessionSnapshot(
     string? LastScanRawCode,
     string? LastScanEmitted,
     TimeSpan? TimeSinceLastScan,
-    string? LastFaultMessage);
+    string? LastFaultMessage,
+    string? SuggestedPortName,
+    string? SuggestedPortDescription);
 
 /// <summary>
 /// 中文：串口来源 + 处理器组成的一次会话。
@@ -99,6 +101,13 @@ public readonly record struct SessionSnapshot(
 /// </summary>
 public sealed class ScannerSession : IDisposable
 {
+    /// <summary>
+    /// 中文：两次重连尝试之间至少隔这么久。枚举要走注册表，而断开状态下会一直重试。
+    /// English: The minimum gap between reconnection attempts. Enumeration walks the registry and
+    ///          retrying continues for as long as the port is closed.
+    /// </summary>
+    private static readonly TimeSpan ReconnectInterval = TimeSpan.FromSeconds(3);
+
     private readonly object _gate = new();
     private readonly ModeManager _modeManager = new();
     private readonly SerialScannerInputSource _source = new();
@@ -111,6 +120,26 @@ public sealed class ScannerSession : IDisposable
     private string? _lastScanEmitted;
     private string? _lastFaultMessage;
     private bool _isDisposed;
+
+    /// <summary>
+    /// 中文：
+    ///   串口报过错，等着在界面线程上收拾。
+    ///
+    ///   ★ 不在故障回调里直接断开，因为那个回调**跑在读取线程上**，而断开会
+    ///     join 那条线程——自己 join 自己，要白等两秒才继续。设个标志，让重连
+    ///     那一轮（跑在界面线程上）去做。
+    /// English:
+    ///   The port faulted and cleanup is owed on the UI thread.
+    ///
+    ///   Disconnecting inside the fault callback is not an option: that callback runs on the reader
+    ///   thread and disconnecting joins that thread — joining itself, which simply burns the
+    ///   two-second timeout. A flag lets the reconnect pass, which runs on the UI thread, do it.
+    /// </summary>
+    private volatile bool _isFaultPending;
+
+    private DateTimeOffset _lastReconnectAttempt = DateTimeOffset.MinValue;
+    private string? _suggestedPortName;
+    private string? _suggestedPortDescription;
 
     /// <summary>
     /// 中文：
@@ -234,6 +263,36 @@ public sealed class ScannerSession : IDisposable
         try
         {
             _source.Connect(portSettings);
+
+            // ★ 连上了却还没有绑定身份，就顺手记一次（规格 §6）。
+            //
+            //   "工人选了这个端口并且真的连上了"，本身就是绑定这个动作——再要求
+            //   他去别处点一下"绑定"，只是多一步他不会明白为什么要做的操作。
+            //
+            //   这也让**已有的配置自动补上身份**：早先的版本只存了端口号，
+            //   没有身份就没有自动重连，而工人不会知道要重新保存一次设置。
+            //
+            //   只在没有绑定时记。已经绑过就不动——那时端口变了可能意味着
+            //   "换了一台设备"，那是需要工人确认的事，不该我们替他决定。
+            // Record the identity when connected without one (spec §6). "The operator chose this
+            // port and it genuinely opened" is the act of binding; asking them to click Bind
+            // somewhere else only adds a step whose purpose they will not see. It also upgrades
+            // existing configurations, which stored a port number and no identity: without one
+            // there is no reconnection, and nobody would know to re-save their settings.
+            //
+            // Only when absent. An existing binding is left alone: a changed port may then mean a
+            // different device, which is the operator's call rather than ours.
+            var needsBinding = false;
+
+            lock (_gate)
+            {
+                needsBinding = _settings.ScannerBinding is null;
+            }
+
+            if (needsBinding && portSettings.PortName is { } connectedPort)
+            {
+                RecordBinding(connectedPort);
+            }
 
             Changed?.Invoke(this, EventArgs.Empty);
             return null;
@@ -440,7 +499,9 @@ public sealed class ScannerSession : IDisposable
                 LastScanRawCode: _lastScanRawCode,
                 LastScanEmitted: _lastScanEmitted,
                 TimeSinceLastScan: timeSinceLastScan,
-                LastFaultMessage: _lastFaultMessage);
+                LastFaultMessage: _lastFaultMessage,
+                SuggestedPortName: _suggestedPortName,
+                SuggestedPortDescription: _suggestedPortDescription);
         }
     }
 
@@ -561,6 +622,206 @@ public sealed class ScannerSession : IDisposable
             _lastFaultMessage = exception.Message;
         }
 
+        // 见 _isFaultPending 的说明：断开必须换一条线程去做。
+        // See _isFaultPending: disconnecting has to happen on another thread.
+        _isFaultPending = true;
+
+        Changed?.Invoke(this, EventArgs.Empty);
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   周期性地做两件事：收拾故障、尝试自动重连。由界面的秒级定时器调用。
+    ///
+    ///   ★ 为什么必须有自动重连。
+    ///
+    ///     工人把枪拔下来扫远处的货、笔记本睡一觉醒来、USB 重新枚举——每一种都会
+    ///     让串口断掉，而端口号还可能从 COM3 变成 COM7。没有自动重连，这些都变成
+    ///     "扫码没反应了，去设置里重选端口"，也就是一通电话。
+    ///
+    ///   ★ 但**不是什么都自动连**。
+    ///
+    ///     置信度是 Exact 或 High（设备实例路径或序列号对上）才自动连——那时
+    ///     我们确知是同一台设备。只靠 VID/PID 对上是 Low：那多半是个通用的
+    ///     USB 转串口芯片，成千上万种设备共用同一个 VID/PID。自动连上去，很可能
+    ///     连到的是另一个转接头，而界面会显示"已连接"、工人扫码却永远没反应——
+    ///     那正是规格 §19.1 最忌讳的"看起来在工作"。
+    ///
+    ///     所以 Low 的时候不连，只把它作为**候选**报给界面，由工人点一下确认。
+    ///     他知道自己刚把枪插到了哪个口，这个判断本来就该他来做。
+    ///
+    ///   ★ 节流到几秒一次：枚举要走注册表，而重连是会一直重试的。
+    /// English:
+    ///   Does two things periodically, called by the UI's one-second timer: clean up after a fault,
+    ///   and try to reconnect.
+    ///
+    ///   Automatic reconnection is necessary because the operator unplugs the scanner to reach
+    ///   distant goods, the laptop sleeps and wakes, USB re-enumerates — each drops the port, and
+    ///   the number may move from COM3 to COM7. Without it, every one of those becomes "scanning
+    ///   does nothing, go into Settings and pick the port again", which is a phone call.
+    ///
+    ///   But not everything is connected automatically. Exact or High confidence — the device
+    ///   instance path or a serial number matched — means we know it is the same device. A VID/PID
+    ///   match alone is Low: that is usually a generic USB-to-serial chip shared by thousands of
+    ///   products, and connecting automatically would likely reach a different adapter while the UI
+    ///   says "connected" and scanning never produces anything — spec §19.1's "looks like it is
+    ///   working" in its purest form. So a Low match is offered to the UI as a suggestion for the
+    ///   operator to confirm with one click: they know which socket they just used, and that
+    ///   judgment was always theirs to make.
+    ///
+    ///   Throttled to a few seconds because enumeration walks the registry and reconnection retries
+    ///   indefinitely.
+    /// </summary>
+    public void Tick()
+    {
+        if (_isDisposed)
+        {
+            return;
+        }
+
+        if (_isFaultPending)
+        {
+            _isFaultPending = false;
+            Disconnect();
+        }
+
+        if (_source.IsConnected)
+        {
+            if (_suggestedPortName is not null)
+            {
+                _suggestedPortName = null;
+                _suggestedPortDescription = null;
+                Changed?.Invoke(this, EventArgs.Empty);
+            }
+
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        if (now - _lastReconnectAttempt < ReconnectInterval)
+        {
+            return;
+        }
+
+        _lastReconnectAttempt = now;
+        TryReconnect();
+    }
+
+    /// <summary>
+    /// 中文：连到界面上提示的那个候选端口，并把它记成新的绑定。
+    /// English: Connects to the suggested port and records it as the new binding.
+    /// </summary>
+    public (string TitleKey, Exception Failure)? ConnectToSuggested()
+    {
+        if (_suggestedPortName is not { } portName)
+        {
+            return null;
+        }
+
+        lock (_gate)
+        {
+            _settings.SerialPort.PortName = portName;
+        }
+
+        var failure = Connect();
+
+        if (failure is null)
+        {
+            RecordBinding(portName);
+            _suggestedPortName = null;
+            _suggestedPortDescription = null;
+        }
+
+        return failure;
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   把当前端口背后的设备身份记进绑定设置（规格 §6）。
+    ///   工人在设置里选定端口、或确认了候选之后调用。
+    ///
+    ///   ★ 记的是身份，不是端口号。端口号会随插在哪个 USB 口而变，
+    ///     而身份不会——重连时是拿身份去找端口，不是反过来。
+    /// English:
+    ///   Records the identity behind the current port into the binding settings (spec §6), after
+    ///   the operator picks a port or confirms a suggestion.
+    ///
+    ///   The identity is recorded rather than the port number: the number moves with the USB
+    ///   socket while the identity does not, and reconnection resolves the port from the identity
+    ///   rather than the other way round.
+    /// </summary>
+    public void RecordBinding(string portName)
+    {
+        if (SerialPortResolver.IdentifyPort(portName) is not { } identity)
+        {
+            return;
+        }
+
+        lock (_gate)
+        {
+            _settings.ScannerBinding = new ScannerBindingSettings
+            {
+                DevicePath = identity.DevicePath,
+                VendorId = identity.VendorId,
+                ProductId = identity.ProductId,
+                FriendlyName = identity.FriendlyName,
+                SerialNumber = identity.SerialNumber,
+            };
+        }
+    }
+
+    /// <summary>
+    /// 中文：尝试一次重连。见 <see cref="Tick"/> 的说明。
+    /// English: One reconnection attempt; see <see cref="Tick"/>.
+    /// </summary>
+    private void TryReconnect()
+    {
+        ScannerBindingSettings? binding;
+
+        lock (_gate)
+        {
+            binding = _settings.ScannerBinding;
+        }
+
+        if (binding is null)
+        {
+            return;
+        }
+
+        var (portName, match) = SerialPortResolver.FindBoundPort(binding);
+
+        if (portName is null)
+        {
+            SetSuggestion(null, null);
+            return;
+        }
+
+        if (match.CanReconnectAutomatically)
+        {
+            lock (_gate)
+            {
+                _settings.SerialPort.PortName = portName;
+            }
+
+            SetSuggestion(null, null);
+            Connect();
+            return;
+        }
+
+        // 置信度不够，只提示不自动连——理由见 Tick。
+        // Not confident enough to connect; suggest only. See Tick for why.
+        SetSuggestion(portName, binding.FriendlyName);
+    }
+
+    private void SetSuggestion(string? portName, string? description)
+    {
+        if (_suggestedPortName == portName)
+        {
+            return;
+        }
+
+        _suggestedPortName = portName;
+        _suggestedPortDescription = description;
         Changed?.Invoke(this, EventArgs.Empty);
     }
 }

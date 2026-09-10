@@ -97,6 +97,10 @@ public static class UiStrings
         ["Connect"] = "Connect",
         ["Disconnect"] = "Disconnect",
 
+        ["ReconnectSuggestion"] =
+            "A device matching the bound scanner appeared on {0} ({1}). Only the vendor and product"
+            + " ID match, which many adapters share — confirm it is your scanner.",
+        ["ReconnectConnect"] = "Connect to it",
         ["LastScan"] = "Last scan",
         ["NoScanYet"] = "Nothing scanned yet",
 
@@ -201,6 +205,10 @@ public static class UiStrings
         ["Connect"] = "连接",
         ["Disconnect"] = "断开",
 
+        ["ReconnectSuggestion"] =
+            "{0} 上出现了一个和绑定的扫码枪相符的设备（{1}）。只有厂商与产品编号对得上，"
+            + "而很多转接头共用同一个编号——请确认它是你的枪。",
+        ["ReconnectConnect"] = "连接它",
         ["LastScan"] = "最近一枪",
         ["NoScanYet"] = "还没有扫过",
 

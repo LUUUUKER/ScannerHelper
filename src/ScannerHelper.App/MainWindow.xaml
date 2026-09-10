@@ -77,6 +77,36 @@
                 <TextBlock x:Name="LinkWarningText" FontSize="12" Margin="0,6,0,0"
                            Foreground="#8A4B08" TextWrapping="Wrap" Visibility="Collapsed" />
 
+                <!--
+                    中文：
+                      候选端口的一键确认。
+
+                      ★ 只在"匹配上了但置信度不够自动连"时出现。程序看到的是 VID/PID
+                        一样，而它看不到桌上有几把枪——那个判断本来就该工人来做，
+                        他知道自己刚把枪插到了哪个口。
+                        自动连上一个不对的设备，界面会显示"已连接"而扫码永远没反应，
+                        那是规格 §19.1 最忌讳的"看起来在工作"。
+                    English:
+                      One-click confirmation of a suggested port, shown only when something matched
+                      but not confidently enough to connect on its own. The program sees matching
+                      vendor and product IDs and cannot see how many scanners are on the desk; that
+                      judgment was always the operator's, who knows which socket they just used.
+                      Connecting to the wrong device would leave the UI saying "connected" while
+                      scanning never produces anything — spec §19.1's "looks like it is working".
+                -->
+                <Border x:Name="SuggestionPanel" Visibility="Collapsed" Margin="0,8,0,0"
+                        Background="#FFF4E5" BorderBrush="#E8A33D" BorderThickness="1"
+                        CornerRadius="3" Padding="8">
+                    <StackPanel>
+                        <TextBlock x:Name="SuggestionText" FontSize="12" TextWrapping="Wrap"
+                                   Foreground="#5A3A10" />
+                        <Button x:Name="ConnectSuggestedButton" Height="28" Margin="0,8,0,0"
+                                HorizontalAlignment="Left" Padding="14,0"
+                                Click="OnConnectSuggestedClicked"
+                                Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[ReconnectConnect]}" />
+                    </StackPanel>
+                </Border>
+
                 <TextBlock Margin="0,10,0,0" FontSize="12"
                            Foreground="{StaticResource MutedTextBrush}"
                            Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[LastScan]}" />

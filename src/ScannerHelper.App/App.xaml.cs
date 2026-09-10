@@ -151,15 +151,32 @@ public partial class App : Application
             ReportRecovery(window, recovery);
         }
 
-        if (failure is { } connectFailure)
-        {
-            MessageBox.Show(
-                window,
-                connectFailure.Failure.Message,
-                Localizer.Get(connectFailure.TitleKey),
-                MessageBoxButton.OK,
-                MessageBoxImage.Warning);
-        }
+        // ★ 启动时连不上**不弹对话框**。
+        //
+        //   有了自动重连之后，这件事三秒之内多半自己就好了：枪还没插稳、系统刚
+        //   唤醒设备还没枚举完、端口号从 COM3 变成了 COM7——每一种都会被重连
+        //   那一轮收拾掉。为一件自愈的事竖一个必须点掉的模态框，是在替工人制造
+        //   工作，而且是他一天里要遇到很多次的那种。
+        //
+        //   界面本来就已经把这件事说清楚了：整块面板变灰、带红色顶栏、写着
+        //   "扫码枪未连接"。真连不上时那个状态会一直留在那儿，比一个被点掉就
+        //   再也看不见的对话框更持久、也更诚实。
+        //
+        //   对话框留给**工人主动发起**的操作：在设置里保存、点"连接它"——
+        //   那时他正等着一个答复，沉默才是错的。
+        // A failed connect at startup raises no dialog. With reconnection in place it usually fixes
+        // itself within seconds — the scanner is not seated yet, the system just woke and devices
+        // are still enumerating, the number moved from COM3 to COM7 — and every one of those is
+        // handled by the next reconnect pass. Putting a modal box in front of something that heals
+        // itself manufactures work for the operator, of a kind they would meet many times a day.
+        //
+        // The UI already says it: the panel turns slate with a red top bar reading "scanner not
+        // connected". If it genuinely cannot connect, that state stays, which is more durable and
+        // more honest than a dialog that disappears once dismissed.
+        //
+        // Dialogs are for actions the operator initiated — saving settings, clicking "connect to
+        // it" — where they are waiting for an answer and silence would be the wrong reply.
+        _ = failure;
     }
 
     /// <summary>

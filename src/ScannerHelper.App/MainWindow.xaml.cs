@@ -133,7 +133,18 @@ public partial class MainWindow : Window
         {
             Interval = RefreshInterval,
         };
-        _refreshTimer.Tick += (_, _) => Refresh();
+        _refreshTimer.Tick += (_, _) =>
+        {
+            // ★ 重连由界面的秒级心跳推动，而不是会话自己起一条线程。
+            //   多一条线程就多一处要考虑"它和界面线程谁先谁后"，而这件事**本来
+            //   就该按秒来**——工人拔插一次枪要好几秒，没有任何理由更快。
+            // Reconnection is driven by the UI's one-second heartbeat rather than a thread of the
+            // session's own. Another thread is another place to reason about ordering against the
+            // UI thread, and this genuinely belongs on a one-second cadence: unplugging and
+            // replugging takes the operator several seconds and nothing here needs to be faster.
+            Session?.Tick();
+            Refresh();
+        };
         _refreshTimer.Start();
 
         Refresh();
@@ -383,6 +394,21 @@ public partial class MainWindow : Window
             : strings["NoScanYet"];
 
         UpdateLinkWarning(snapshot);
+
+        // 候选端口：置信度不够自动连，但工人点一下就能确认（见 ScannerSession.Tick）。
+        // A suggested port: not confident enough to connect automatically, but one click from the
+        // operator settles it (see ScannerSession.Tick).
+        var hasSuggestion = !snapshot.IsConnected && snapshot.SuggestedPortName is not null;
+        SuggestionPanel.Visibility = hasSuggestion ? Visibility.Visible : Visibility.Collapsed;
+
+        if (hasSuggestion)
+        {
+            SuggestionText.Text = Localizer.Format(
+                "ReconnectSuggestion",
+                snapshot.SuggestedPortName ?? string.Empty,
+                snapshot.SuggestedPortDescription ?? string.Empty);
+        }
+
         _compactWindow?.Refresh(snapshot);
     }
 
@@ -449,6 +475,33 @@ public partial class MainWindow : Window
     private void OnForceSendClicked(object sender, RoutedEventArgs e) => Session?.ForceSend();
 
     private void OnDiscardClicked(object sender, RoutedEventArgs e) => Session?.Discard();
+
+    /// <summary>
+    /// 中文：
+    ///   工人确认那个候选端口就是他的枪。
+    ///
+    ///   ★ 这一下点击的含义是"我知道我把枪插到哪儿了"——那个判断本来就该他来做。
+    ///     程序只能看到 VID/PID 一样，看不到桌上有几把枪。
+    /// English:
+    ///   The operator confirms the suggested port is their scanner. The click means "I know where I
+    ///   plugged it in", which was always their judgment to make: the program sees matching VID and
+    ///   PID and cannot see how many scanners are on the desk.
+    /// </summary>
+    private void OnConnectSuggestedClicked(object sender, RoutedEventArgs e)
+    {
+        if (Session?.ConnectToSuggested() is { } failure)
+        {
+            MessageBox.Show(
+                this,
+                failure.Failure.Message,
+                Localizer.Get(failure.TitleKey),
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+
+        CurrentApp.SaveSettings();
+        Refresh();
+    }
 
     private void OnSettingsClicked(object sender, RoutedEventArgs e)
     {

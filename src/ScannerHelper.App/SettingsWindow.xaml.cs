@@ -314,6 +314,19 @@ public partial class SettingsWindow : Window
         settings.ModeSwitchSoundEnabled = ModeSoundCheck.IsChecked == true;
         settings.ErrorSoundEnabled = ErrorSoundCheck.IsChecked == true;
         settings.SerialPort.PortName = PortCombo.SelectedItem as string;
+
+        // ★ 选定端口的同时把它背后的**设备身份**记下来（规格 §6）。
+        //   只记端口号是不够的：换一个 USB 口 COM3 就可能变成 COM7，而工人不会
+        //   知道这件事——他只知道"昨天还好好的"。记了身份，重连时才能拿身份去
+        //   找现在的端口。
+        // Record the identity behind the port as well as the port itself (spec §6). The number
+        // alone is not enough: another USB socket can turn COM3 into COM7, which the operator will
+        // never know — they only know it worked yesterday. With the identity recorded, reconnection
+        // can resolve the current port from it.
+        if (settings.SerialPort.PortName is { } chosenPort)
+        {
+            CurrentApp.Session?.RecordBinding(chosenPort);
+        }
         settings.SerialPort.BaudRate = int.Parse(
             (string)((ComboBoxItem)BaudCombo.SelectedItem).Content, CultureInfo.InvariantCulture);
 
