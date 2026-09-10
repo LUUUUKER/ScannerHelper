@@ -54,7 +54,9 @@ Continuing D-1…D-10 from `TEST_PLAN_PHASE_A.md`. The test cases below assume t
 | EV3 | `RawInputEvent` carries a device identity plus the same correlation identity | Both channels expose one comparable identity |
 | EV4 | `ScanResult` is a closed discriminated type; a failed result exposes no scan value | Same construction as `ParseResult` (D-7) |
 | EV5 | A failed `ScanResult` retains the raw code | Force Send and the error display both need it (spec §10) |
-| EV6 | No user-facing prose on the new public API | Extends D6's guard to Task 6's types |
+| EV6 | No user-facing prose on the new public API | **Already covered; deliberately no separate test** — see below |
+
+**EV6 has no test of its own, and that is a decision rather than an omission.** `ResultTypeGuardTests`' D6 sweeps every exported type in `typeof(ParseResult).Assembly`, which is Core, so Task 6's types fall under it automatically. Writing a second test would duplicate an existing guard, and a duplicated guard is worse than a missing one: both have to change together, and missing one leaves two rules quietly contradicting each other. The reason is recorded here because "why is there no EV6" needs an answer, or the next reader assumes it was forgotten.
 
 **EV2 is the one that would be skipped and shouldn't be.** It looks like a restatement of D-11, but D-11 is a property of the *correlator* while EV2 is a property of the *type*. Making the identity a member of `KeyEvent` that structurally cannot contain the virtual key means no future correlator implementation can reintroduce the fault, however it is rewritten. Guarding the algorithm alone would leave the next rewrite free to repeat a bug that cost a full measurement run to find.
 
@@ -79,7 +81,7 @@ Spec §17 fixes the vocabulary: `Swallow`, `PassThrough`, `Replay`, `Undecided`.
 
 **CR3 is the case the measurements say is rare and the design must still handle.** 24 of 3799 events arrived Raw-Input-first. An implementation that assumed hook-always-first would be correct 99.4% of the time and wrong roughly once per forty scans — frequent enough to matter, rare enough to survive a demonstration.
 
-**CR4 is Task 4a's finding in executable form.** Verified by keying the correlator on the virtual key instead: CR4 fails, and every scan containing an uppercase letter is attributed to the wrong device.
+**CR4 is Task 4a's finding in executable form — with one honest caveat.** It cannot be made to fail by changing the correlator, and that was attempted rather than assumed. `RawInputEvent` carries no virtual key and neither does `KeyIdentity`, so "pair on the virtual key" is not expressible: the correlator does not avoid the mistake, the types make it impossible. That is stronger than a test that can go red, but it means CR4 guards a *future* change rather than today's implementation — adding a virtual key to `RawInputEvent` and folding it into `KeyIdentity` turns it red immediately. Stating it as more than that would repeat the error D4 was written to avoid.
 
 ### 4.2 Ordering and interleaving
 
@@ -104,7 +106,7 @@ Spec §17 fixes the vocabulary: `Swallow`, `PassThrough`, `Replay`, `Undecided`.
 
 **CR17 is the harness's bug written as a test, and it is the most valuable case in this file.** Without expiry, one missing event shifts a FIFO queue permanently and every subsequent event pairs with one from seconds earlier. The consequence is not an obvious failure but a plausible-looking one: the median stays sane while the tail goes to −14.8 seconds. In the product the same fault would attribute keystrokes to the wrong device long after the event that caused it, with nothing pointing back at the cause.
 
-Verify CR17 by removing the expiry: it fails, and CR10 and CR12 fail with it, because the three describe one property from three directions.
+**Verified by removing the expiry: CR17 fails, and CR10 and CR12 fail with it** — exactly as predicted, the three being one property seen from three directions. CR11 was verified separately by deleting its early return, and fails alone.
 
 **CR11 deserves its own note.** Injected events must be recognized and passed through *before* correlation is attempted, not after. Task 4a confirmed that synthesized events never appear on the Raw Input channel at all, so an injected event entering correlation would wait for a counterpart that cannot exist, expire, and be replayed — feeding our own output back into our own pipeline. That is precisely the recursion spec §5.6 forbids, arriving by a route that looks like correct timeout handling.
 
