@@ -1,0 +1,48 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    中文：
+      人工诊断工具（规格 §20）。它**不是** xUnit 测试项目。
+
+      规格 §20 说得很直接：需要真实硬件、真实焦点程序和一个盯着屏幕的人的检查，
+      写成 xUnit 就是"名义上的测试套件"——跑不了 CI，也没人会去跑。所以这里
+      是一个带界面的工具，由人操作、由人判读，产出一份可以提交进 docs/ 的
+      测量报告。
+
+      IsTestProject 显式设为 false，免得 dotnet test 把它当成测试项目去加载。
+    English:
+      The manual diagnostics harness (spec §20). It is *not* an xUnit project.
+
+      Spec §20 is blunt about this: checks needing real hardware, a real focused
+      application and a human observer are a test suite in name only — they cannot run
+      in CI and nobody runs them. So this is a tool with a UI, driven and read by a
+      person, producing a measurement report that gets committed under docs/.
+
+      IsTestProject is set to false explicitly so dotnet test does not try to load it.
+  -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+
+    <IsTestProject>false</IsTestProject>
+    <IsPackable>false</IsPackable>
+
+    <!--
+      中文：绝不请求提权（规格 §2.1 的假设 A2）。业务软件以普通权限运行，
+            本工具必须与之同级，否则 UIPI 会让钩子看不到它的按键。
+      English: Never request elevation (spec §2.1, assumption A2). The business
+               application runs unelevated and this must match, or UIPI blocks the
+               hook from observing its keystrokes at all.
+    -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\ScannerHelper.Win32\ScannerHelper.Win32.csproj" />
+  </ItemGroup>
+
+</Project>

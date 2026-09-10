@@ -11,6 +11,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "tests", "tests", "{3A939013
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScannerHelper.Core.Tests", "tests\ScannerHelper.Core.Tests\ScannerHelper.Core.Tests.csproj", "{62BAA51A-4308-4B96-98BC-111936CE2827}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScannerHelper.Win32", "src\ScannerHelper.Win32\ScannerHelper.Win32.csproj", "{5386D911-BA54-4A52-BF27-4CDC3F3AB588}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "ScannerHelper.Diagnostics.Harness", "tests\ScannerHelper.Diagnostics.Harness\ScannerHelper.Diagnostics.Harness.csproj", "{2FD1A1D8-3376-402F-80FB-DC058D05AADD}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -28,9 +32,19 @@ Global
 		{62BAA51A-4308-4B96-98BC-111936CE2827}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{62BAA51A-4308-4B96-98BC-111936CE2827}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{62BAA51A-4308-4B96-98BC-111936CE2827}.Release|Any CPU.Build.0 = Release|Any CPU
+		{5386D911-BA54-4A52-BF27-4CDC3F3AB588}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{5386D911-BA54-4A52-BF27-4CDC3F3AB588}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{5386D911-BA54-4A52-BF27-4CDC3F3AB588}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{5386D911-BA54-4A52-BF27-4CDC3F3AB588}.Release|Any CPU.Build.0 = Release|Any CPU
+		{2FD1A1D8-3376-402F-80FB-DC058D05AADD}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{2FD1A1D8-3376-402F-80FB-DC058D05AADD}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{2FD1A1D8-3376-402F-80FB-DC058D05AADD}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{2FD1A1D8-3376-402F-80FB-DC058D05AADD}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(NestedProjects) = preSolution
 		{FD5A4CEC-FEA1-40C7-BDD8-0E3981AAD46E} = {5DBD0437-A81A-4880-A0B7-427F7AADD059}
 		{62BAA51A-4308-4B96-98BC-111936CE2827} = {3A939013-9E6D-4EF1-9969-A35FF3B361B3}
+		{5386D911-BA54-4A52-BF27-4CDC3F3AB588} = {5DBD0437-A81A-4880-A0B7-427F7AADD059}
+		{2FD1A1D8-3376-402F-80FB-DC058D05AADD} = {3A939013-9E6D-4EF1-9969-A35FF3B361B3}
 	EndGlobalSection
 EndGlobal

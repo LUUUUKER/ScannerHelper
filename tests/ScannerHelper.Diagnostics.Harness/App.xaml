@@ -1,0 +1,25 @@
+<Application x:Class="ScannerHelper.Diagnostics.Harness.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             StartupUri="MainWindow.xaml">
+    <Application.Resources>
+
+        <!--
+            中文：诊断工具的视觉风格刻意保持朴素：这是给工程师和现场人员读数据用的，
+                  不是产品界面。信息密度优先于观感，日志区一律等宽字体。
+            English: The harness's styling is deliberately plain. It exists for engineers
+                     and on-site staff to read data from, not as product UI. Information
+                     density beats aesthetics, and the log uses a monospace face.
+        -->
+
+        <Style x:Key="SectionHeader" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold" />
+            <Setter Property="Margin" Value="0,8,0,4" />
+        </Style>
+
+        <Style x:Key="Monospace" TargetType="TextBlock">
+            <Setter Property="FontFamily" Value="Consolas, Courier New, monospace" />
+        </Style>
+
+    </Application.Resources>
+</Application>

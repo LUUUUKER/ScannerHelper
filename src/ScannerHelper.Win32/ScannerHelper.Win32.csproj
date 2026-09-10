@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!--
+    中文：
+      全部原生互操作都住在这个项目里（规格 §16）。目标框架是 net8.0-windows，
+      与 Core 的 net8.0 形成一道由编译器强制执行的边界：一旦有人试图从 Core
+      引用本项目，NuGet 会立刻报 NU1201，构建当场失败。
+
+      依赖方向向内：本项目引用 Core 并实现它定义的接口，反过来绝不允许。
+    English:
+      All native interop lives here (spec §16). Targeting net8.0-windows against
+      Core's net8.0 makes the boundary compiler-enforced: referencing this project
+      from Core fails the build immediately with NU1201.
+
+      Dependencies point inward — this project references Core and implements the
+      interfaces Core defines, never the reverse.
+  -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ScannerHelper.Core\ScannerHelper.Core.csproj" />
+  </ItemGroup>
+
+</Project>

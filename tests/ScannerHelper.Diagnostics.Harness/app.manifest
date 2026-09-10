@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="utf-8"?>
+<assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
+
+  <!--
+    中文：
+      本清单只做两件事，两件都与规格挂钩。
+
+      1. requestedExecutionLevel = asInvoker —— 绝不提权（规格 §2.1 假设 A2）。
+         业务软件是普通权限的浏览器。若本工具以管理员身份运行，UIPI 会让它
+         既看不到浏览器的按键、也无法向浏览器发送输入——整个用户态架构当场
+         失效，而且失效得很安静：程序照常运行，就是什么都收不到。
+
+      2. dpiAware / dpiAwareness —— 声明 PerMonitorV2（规格 §18 要求支持
+         100%、125%、150% 缩放）。不声明的话 Windows 会对窗口做位图拉伸，
+         界面发虚，而且拿到的窗口坐标是虚拟化过的，与规格 §11.5 "校验存储的
+         坐标是否落在可见屏幕内" 对不上。
+    English:
+      This manifest does two things, both tied to the spec.
+
+      1. asInvoker — never elevate (spec §2.1, assumption A2). The business
+         application is an unelevated browser. Running elevated would have UIPI block
+         this tool from both observing the browser's keystrokes and sending input to
+         it — the entire user-mode architecture fails, and fails quietly: the program
+         runs normally and simply receives nothing.
+
+      2. PerMonitorV2 DPI awareness (spec §18 requires 100%, 125% and 150% scaling).
+         Without it Windows bitmap-stretches the window, blurring it and handing back
+         virtualized coordinates that do not match spec §11.5's requirement to
+         validate stored coordinates against the visible desktop.
+  -->
+
+  <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
+    <security>
+      <requestedPrivileges xmlns="urn:schemas-microsoft-com:asm.v3">
+        <requestedExecutionLevel level="asInvoker" uiAccess="false" />
+      </requestedPrivileges>
+    </security>
+  </trustInfo>
+
+  <compatibility xmlns="urn:schemas-microsoft-com:compatibility.v1">
+    <application>
+      <!-- Windows 10 / 11 -->
+      <supportedOS Id="{8e0f7a12-bfb3-4fe8-b9a5-48fd50a15a9a}" />
+    </application>
+  </compatibility>
+
+  <application xmlns="urn:schemas-microsoft-com:asm.v3">
+    <windowsSettings>
+      <dpiAware xmlns="http://schemas.microsoft.com/SMI/2005/WindowsSettings">true/pm</dpiAware>
+      <dpiAwareness xmlns="http://schemas.microsoft.com/SMI/2016/WindowsSettings">permonitorv2</dpiAwareness>
+    </windowsSettings>
+  </application>
+
+</assembly>

@@ -1,0 +1,9 @@
+{
+  "solution": {
+    "path": "ScannerHelper.sln",
+    "projects": [
+      "src\\ScannerHelper.Core\\ScannerHelper.Core.csproj",
+      "tests\\ScannerHelper.Core.Tests\\ScannerHelper.Core.Tests.csproj"
+    ]
+  }
+}

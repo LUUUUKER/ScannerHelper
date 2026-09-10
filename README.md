@@ -54,16 +54,34 @@ violation cannot pass silently. Guarded by `ArchitectureTests`.
 
 需要 [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0)。
 
+**在 Windows 上**（完整解决方案，含原生项目）：
+
 ```bash
 dotnet build ScannerHelper.sln
 dotnet test  ScannerHelper.sln
 ```
 
-Phase A 的全部内容在 macOS、Linux、Windows 上都应当构建通过、测试全绿。
-若在非 Windows 机器上失败，说明分层边界被破坏了。
+**在 macOS / Linux 上**，用跨平台筛选器，它只包含 `net8.0` 的两个项目：
 
-Everything in Phase A must build and test green on macOS, Linux and Windows alike.
-A failure on a non-Windows machine means the layering boundary has been breached.
+```bash
+dotnet build ScannerHelper.CrossPlatform.slnf
+dotnet test  ScannerHelper.CrossPlatform.slnf
+```
+
+筛选器存在的理由只有一个：验收标准 20 要求"`ScannerHelper.Core` 能在非 Windows
+机器上构建、且全部单元测试通过，以此证明分层边界成立"。自从
+`ScannerHelper.Win32` 和诊断工具进入解决方案，`dotnet build ScannerHelper.sln`
+在 macOS 上必然失败——那是**目标框架不兼容**，不是分层出了问题，但两者的
+报错长得一样。筛选器把这两种情况分开：筛选器一旦变红，就真的是 `Core` 沾上了
+Windows 依赖。
+
+The filter exists for exactly one reason: acceptance criterion 20 requires
+`ScannerHelper.Core` to build and pass its full test suite on a non-Windows machine,
+proving the layering boundary holds. Since `ScannerHelper.Win32` and the harness
+joined the solution, `dotnet build ScannerHelper.sln` necessarily fails on macOS —
+that is target-framework incompatibility, not a layering problem, and the two look
+alike in the output. The filter separates them: if the filter goes red, `Core` really
+has acquired a Windows dependency.
 
 警告一律当作错误（见 `Directory.Build.props`）。
 

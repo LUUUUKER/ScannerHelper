@@ -243,6 +243,9 @@ The hook passes **every** event through unchanged. Nothing is swallowed, so this
 3. Inter-character interval per scanner model, versus a human typing.
 4. Whether Raw Input device identity is stable across replug and reboot.
 5. What a full scan looks like end to end: modifiers, CapsLock interaction, terminating Enter.
+6. **Is the laptop's built-in keyboard enumerated by Raw Input, and what shape is its device name?** Spec assumption A4: it is normally a PS/2 or ACPI device rather than USB HID. Binding depends on it being a distinct, stable `hDevice`; an assumption that every keyboard is a HID device would be discovered too late.
+
+**Report the machine the measurements came from.** The development machine and the pilot machines are not the same hardware, and event timing is a property of the machine, not of the code. Every figure recorded here is provisional until it is reproduced on a real pilot workstation — state that explicitly in the report rather than leaving a reader to assume the numbers are site-representative.
 
 Commit the measurement report into `docs/`. It is the evidence base for every later architectural argument.
 
@@ -614,7 +617,7 @@ Perform manual acceptance matrix on at least:
 - Windows 10 workstation if available
 - Windows 11 workstation
 - At least two different scanner models/brands if available
-- At least one external normal keyboard
+- **The laptop's built-in keyboard** (spec assumption A4). An external USB keyboard is not a substitute: the internal keyboard is usually a PS/2 or ACPI device rather than USB HID, which is precisely the axis device identification turns on. Test an external keyboard additionally if one is available, never instead.
 
 Verify every acceptance criterion in `docs/SCANNER_HELPER_SPEC.md`.
 

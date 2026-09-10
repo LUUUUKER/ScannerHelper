@@ -1,0 +1,151 @@
+<Window x:Class="ScannerHelper.Diagnostics.Harness.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Scanner Helper — Task 4a 输入观测 / Input Observation"
+        Width="1180" Height="760" MinWidth="900" MinHeight="600">
+
+    <!--
+        中文：布局分四块，自上而下对应使用顺序：
+              控制条 → 设备与统计 / 事件日志 → 人工记录与导出。
+              工具的使用者是工程师或现场人员，界面按"先做什么后做什么"排布，
+              而不是按视觉美观排布。
+        English: Four regions, top to bottom in the order they are used: controls,
+                 then devices and statistics beside the event log, then notes and
+                 export. The users are engineers and on-site staff, so the layout
+                 follows the order of operations rather than visual balance.
+    -->
+
+    <DockPanel Margin="10">
+
+        <!-- 控制条 / Controls -->
+        <Border DockPanel.Dock="Top" BorderBrush="#D0D0D0" BorderThickness="0,0,0,1" Padding="0,0,0,8">
+            <StackPanel>
+                <StackPanel Orientation="Horizontal">
+                    <Button x:Name="StartButton" Content="开始观测 / Start" Width="130" Height="28"
+                            Click="OnStartClicked" />
+                    <Button x:Name="StopButton" Content="停止 / Stop" Width="100" Height="28" Margin="8,0,0,0"
+                            Click="OnStopClicked" IsEnabled="False" />
+                    <Button x:Name="ResetButton" Content="清空数据 / Reset" Width="120" Height="28" Margin="8,0,0,0"
+                            Click="OnResetClicked" />
+                    <Button x:Name="RefreshDevicesButton" Content="重新枚举设备 / Re-enumerate" Width="180" Height="28"
+                            Margin="8,0,0,0" Click="OnRefreshDevicesClicked" />
+                    <TextBlock x:Name="StatusText" VerticalAlignment="Center" Margin="16,0,0,0"
+                               Text="未开始 / Not started" />
+                </StackPanel>
+
+                <TextBlock TextWrapping="Wrap" Margin="0,8,0,0" Foreground="#555555">
+                    本工具<Run FontWeight="Bold">不拦截任何按键</Run>：钩子装上后每个事件都原样放行，
+                    对系统的影响仅限于每次按键多几十纳秒，因此可以安全地在真实工作机上运行（规格 §4.3）。
+                    开始观测后请切到业务软件正常扫码与打字，本窗口不需要保持焦点。
+                </TextBlock>
+            </StackPanel>
+        </Border>
+
+        <!-- 人工记录与导出 / Notes and export -->
+        <Border DockPanel.Dock="Bottom" BorderBrush="#D0D0D0" BorderThickness="0,1,0,0" Padding="0,8,0,0">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <StackPanel Grid.Column="0" Margin="0,0,12,0">
+                    <TextBlock Text="测量机器（必填，否则报告无法判断数据代表哪台机器） / Machine (required)"
+                               Style="{StaticResource SectionHeader}" Margin="0,0,0,4" />
+                    <TextBox x:Name="MachineTextBox" Height="24"
+                             ToolTip="例：ThinkPad T14 Gen3 / Windows 11 23H2 / 开发机，非现场机" />
+
+                    <TextBlock Text="人工观察记录：修饰键、CapsLock、终止回车的实际表现 / Operator notes"
+                               Style="{StaticResource SectionHeader}" />
+                    <TextBox x:Name="NotesTextBox" Height="56" AcceptsReturn="True" TextWrapping="Wrap"
+                             VerticalScrollBarVisibility="Auto" />
+                </StackPanel>
+
+                <StackPanel Grid.Column="1" VerticalAlignment="Bottom">
+                    <Button x:Name="ExportButton" Content="导出测量报告 / Export report"
+                            Width="190" Height="32" Click="OnExportClicked" />
+                    <TextBlock x:Name="ExportHintText" Margin="0,6,0,0" TextWrapping="Wrap" Width="190"
+                               Foreground="#555555" FontSize="11" />
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <!-- 设备与统计 / Devices and statistics -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.15*" MinWidth="380" />
+                <ColumnDefinition Width="6" />
+                <ColumnDefinition Width="*" MinWidth="330" />
+            </Grid.ColumnDefinitions>
+
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Text="事件日志 / Event log"
+                           Style="{StaticResource SectionHeader}" />
+
+                <CheckBox x:Name="AutoScrollCheckBox" DockPanel.Dock="Bottom" Margin="0,6,0,0"
+                          Content="自动滚动到最新 / Auto-scroll" IsChecked="True" />
+
+                <ListView x:Name="EventListView" FontFamily="Consolas, Courier New, monospace" FontSize="11">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="毫秒 / ms" Width="72"
+                                            DisplayMemberBinding="{Binding RelativeMilliseconds}" />
+                            <GridViewColumn Header="通道 / Channel" Width="82"
+                                            DisplayMemberBinding="{Binding Channel}" />
+                            <GridViewColumn Header="键 / Key" Width="96"
+                                            DisplayMemberBinding="{Binding Key}" />
+                            <GridViewColumn Header="方向 / Dir" Width="52"
+                                            DisplayMemberBinding="{Binding Direction}" />
+                            <GridViewColumn Header="设备 / Device" Width="180"
+                                            DisplayMemberBinding="{Binding Device}" />
+                            <GridViewColumn Header="标志 / Flags" Width="80"
+                                            DisplayMemberBinding="{Binding Flags}" />
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <DockPanel Grid.Column="2">
+                <TextBlock DockPanel.Dock="Top" Text="通道先后与时差 / Channel ordering and delta"
+                           Style="{StaticResource SectionHeader}" />
+                <Border DockPanel.Dock="Top" Background="#F6F6F6" Padding="8" CornerRadius="3">
+                    <TextBlock x:Name="OrderingText" FontFamily="Consolas, Courier New, monospace"
+                               FontSize="12" TextWrapping="Wrap" Text="—" />
+                </Border>
+
+                <TextBlock DockPanel.Dock="Top" Text="数据有效性 / Data validity"
+                           Style="{StaticResource SectionHeader}" />
+                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" x:Name="ValidityBorder"
+                        Background="#F6F6F6">
+                    <TextBlock x:Name="ValidityText" FontFamily="Consolas, Courier New, monospace"
+                               FontSize="12" TextWrapping="Wrap" Text="—" />
+                </Border>
+
+                <TextBlock DockPanel.Dock="Top" Text="设备 / Devices"
+                           Style="{StaticResource SectionHeader}" />
+
+                <ListView x:Name="DeviceListView" FontSize="11">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="设备 / Device" Width="150"
+                                            DisplayMemberBinding="{Binding Name}" />
+                            <GridViewColumn Header="VID/PID" Width="118"
+                                            DisplayMemberBinding="{Binding VendorProduct}" />
+                            <GridViewColumn Header="字符 / Chars" Width="58"
+                                            DisplayMemberBinding="{Binding Characters}" />
+                            <GridViewColumn Header="段 / Bursts" Width="52"
+                                            DisplayMemberBinding="{Binding Bursts}" />
+                            <GridViewColumn Header="最大段 / Max" Width="62"
+                                            DisplayMemberBinding="{Binding LargestBurst}" />
+                            <GridViewColumn Header="中位间隔 / Median ms" Width="120"
+                                            DisplayMemberBinding="{Binding MedianInterval}" />
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </DockPanel>
+        </Grid>
+
+    </DockPanel>
+</Window>

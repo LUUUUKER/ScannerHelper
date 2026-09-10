@@ -34,6 +34,15 @@ These are **confirmed facts about the target environment**, not guesses. The V1 
 | A1 | The business application is a **web application** running in Chrome or Edge. | Browsers handle `SendInput` with `KEYEVENTF_UNICODE` reliably, so output can be emitted as Unicode characters instead of simulated scan codes. This sidesteps keyboard-layout mismatches entirely. |
 | A2 | The browser runs at **normal (non-elevated) user privilege**. | Scanner Helper runs at the same integrity level. If the business application were elevated, UIPI would prevent the low-level hook from observing its keystrokes **and** prevent `SendInput` from reaching it — the entire user-mode architecture would fail. |
 | A3 | Only one operator uses one workstation with one scanner at a time. | Justifies the single-scanner binding model. |
+| A4 | Workstations are **laptops**, and the "normal keyboard" is the **built-in** one. There is normally no external keyboard attached. | Two consequences, below. |
+
+**Consequence of A4 — the built-in keyboard changes two things:**
+
+1. **It is not a USB HID device.** A laptop's internal keyboard is typically exposed through `i8042prt` (PS/2) or ACPI rather than USB HID, so Raw Input reports a device name shaped like `\??\ACPI#PNP0303#...` instead of `\??\HID#VID_xxxx&PID_xxxx#...`. Device binding still works — it is still a distinct `hDevice` — but the spike must confirm the internal keyboard is enumerated and distinguishable, rather than assuming every keyboard looks like a HID device.
+
+2. **There is no spare keyboard to rescue the operator with.** On a desktop, "Scanner Helper swallowed my keystrokes" can be worked around by plugging in another keyboard. On a laptop it cannot. The mouse-only requirement for `PAUSED` (section 5.7) is therefore not a convenience but the **only** escape route, and the touchpad is the only device that reaches it.
+
+Acceptance testing must consequently use the built-in keyboard as the primary "normal keyboard". A result obtained with an external USB keyboard does not transfer, because the two are different device classes on the very axis the architecture depends on.
 
 **Consequence of A2 — hard requirement:** Scanner Helper must **not** request elevation, and must be verified against the business application at matching integrity level. If the warehouse later switches to an elevated business application, stop and re-evaluate the architecture; do not attempt to work around UIPI.
 
