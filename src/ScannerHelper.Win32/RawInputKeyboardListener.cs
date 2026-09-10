@@ -258,6 +258,7 @@ public sealed class RawInputKeyboardListener : IDisposable
             Timestamp: timestamp,
             VirtualKey: rawInput.keyboard.VKey,
             ScanCode: rawInput.keyboard.MakeCode,
+            IsExtended: (rawInput.keyboard.Flags & RawInputNative.RI_KEY_E0) != 0,
             IsKeyUp: (rawInput.keyboard.Flags & RawInputNative.RI_KEY_BREAK) != 0,
 
             // 合成事件（SendInput）不经过 Raw Input，因此这条通道上恒为 false。

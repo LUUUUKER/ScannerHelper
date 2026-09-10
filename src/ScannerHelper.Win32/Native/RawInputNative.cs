@@ -95,11 +95,19 @@ internal static class RawInputNative
     internal const uint RIM_TYPEKEYBOARD = 1;
 
     /// <summary>
-    /// 中文：RAWKEYBOARD.Flags 的位。RI_KEY_BREAK 表示弹起（没有这个位就是按下）。
-    /// English: Bits in RAWKEYBOARD.Flags. RI_KEY_BREAK means key up; its absence
-    ///          means key down.
+    /// 中文：RAWKEYBOARD.Flags 的位。
+    ///       RI_KEY_BREAK 表示弹起（没有这个位就是按下）。
+    ///       RI_KEY_E0 表示这是一个扫描码带 E0 前缀的扩展键，对应钩子那边的
+    ///       LLKHF_EXTENDED。跨通道配对必须比对它——扫描码本身会重复
+    ///       （右 Ctrl 与左 Ctrl 相同），只有加上这一位才能区分。
+    /// English: Bits in RAWKEYBOARD.Flags. RI_KEY_BREAK means key up, its absence key
+    ///          down. RI_KEY_E0 marks an extended key whose scan code carries an E0
+    ///          prefix, corresponding to the hook's LLKHF_EXTENDED. Cross-channel
+    ///          pairing must compare it: scan codes repeat — right Ctrl shares left
+    ///          Ctrl's — and only this bit separates them.
     /// </summary>
     internal const ushort RI_KEY_BREAK = 0x01;
+    internal const ushort RI_KEY_E0 = 0x02;
 
     /// <summary>
     /// 中文：注册要接收哪一类设备的原始输入。

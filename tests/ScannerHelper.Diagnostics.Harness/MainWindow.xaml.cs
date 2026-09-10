@@ -5,66 +5,62 @@
 //   诊断工具的主窗口。只负责显示与按钮，不含任何观测逻辑——那些都在
 //   ObservationSession 里。4b 要把观测换成拦截时，本文件基本不用动。
 //
-//   ★ 三件与 Win32 相关、必须在窗口这一层做的事：
+//   ★ 本窗口**完全不参与捕获**，这是第一轮实测之后改的。
 //
-//     1. **拿到窗口句柄再注册 Raw Input。** RIDEV_INPUTSINK 需要一个真实的
-//        HWND，而 WPF 的 Window 在 SourceInitialized 之前是没有句柄的。
+//     最初的版本把 Raw Input 注册到本窗口、在 WPF 的窗口过程里接 `WM_INPUT`、
+//     并在界面线程上装钩子。结果是扫码枪的段内间隔 p99 量到了 48 毫秒——
+//     扫码枪根本不可能有这种停顿，那是界面每 100 毫秒重建列表控件、把消息
+//     挤到后面去造成的。`WM_INPUT` 的时间戳只能是"消息循环处理到它的时刻"，
+//     界面一忙，量到的就不是硬件的性质而是"界面有多卡"的性质。
 //
-//     2. **在窗口过程里接住 WM_INPUT。** WPF 本身不转发这个消息，必须通过
-//        HwndSource 挂一个钩子。时间戳要在认出消息的**第一时间**取——晚一步，
-//        取到的就不再是"消息何时到达"而是"我们处理了多久"，而两条通道的
-//        时差正是本工具唯一要测的东西。
+//     现在捕获整个搬到 InputCaptureThread：一条专用线程，一个仅消息窗口，
+//     只泵消息、不碰界面。本窗口只做两件事——每隔一小段时间把环形缓冲区
+//     里的事件取出来显示，以及提供几个按钮。
 //
-//     3. **在界面线程上安装键盘钩子。** 低层键盘钩子的回调靠安装线程的消息
-//        队列驱动，装在没有消息泵的线程上会一个事件都收不到，而且不报任何错。
+//   ★ 界面与捕获之间没有任何同步点。
 //
-//   ★ 界面刷新与钩子回调之间没有任何同步点。
-//
-//     回调只往无锁环形缓冲区里写，界面每 100 毫秒来取一次。因此界面再慢也
-//     不可能拖住回调——而拖住回调超过 300 毫秒，Windows 会悄悄摘掉钩子
-//     （规格 §19.1）。这也是为什么日志列表有条数上限：让它无限增长，界面
-//     迟早会卡，虽然卡不到回调，但会让工具本身没法用。
+//     捕获线程只往无锁环形缓冲区里写，界面每 100 毫秒来取一次。因此界面
+//     再慢也不可能拖住钩子回调——而拖住回调超过 300 毫秒，Windows 会悄悄
+//     摘掉钩子（规格 §19.1）。日志列表有条数上限也是同理：让它无限增长，
+//     界面迟早会卡，虽然现在卡不到捕获，但会让工具本身没法用。
 //
 // English:
 //   The harness's main window. Display and buttons only; the observation logic lives in
 //   ObservationSession, so switching from observation to interception in 4b barely
 //   touches this file.
 //
-//   Three Win32 concerns must be handled at the window level. First, Raw Input
-//   registration needs a real HWND, which a WPF Window does not have until
-//   SourceInitialized. Second, WPF does not forward WM_INPUT, so the window procedure
-//   must be hooked through HwndSource — and the timestamp must be taken the instant the
-//   message is recognized, or it stops describing when the message arrived and starts
-//   describing how long we took, which is the one thing this tool measures. Third, the
-//   keyboard hook must be installed on the UI thread: its callback is driven by the
-//   installing thread's message queue, and on a thread without a pump it receives
-//   nothing and reports no error.
+//   This window takes no part in capture, which changed after the first measurement
+//   run. The original version registered Raw Input to this window, caught WM_INPUT in
+//   the WPF window procedure, and installed the hook on the UI thread. The result was a
+//   48 ms p99 for the scanner's within-burst interval — impossible for a scanner, and
+//   caused by the UI rebuilding list controls every 100 ms and pushing messages behind
+//   it. A WM_INPUT timestamp can only be "when the message loop reached it", so a busy
+//   UI turns the measurement from a property of the hardware into a property of how
+//   sluggish the UI is.
 //
-//   There is no synchronization point between the UI refresh and the hook callback. The
-//   callback only writes into a lock-free ring buffer and the UI collects every 100 ms,
-//   so no amount of UI slowness can stall the callback — and stalling it past 300 ms has
-//   Windows silently remove the hook (spec §19.1). That is also why the log list is
-//   capped: unbounded growth would eventually freeze the UI which, while it could not
-//   reach the callback, would make the tool itself unusable.
+//   Capture now lives entirely in InputCaptureThread: a dedicated thread with a
+//   message-only window that pumps messages and touches no UI. This window only drains
+//   the ring buffer periodically for display, and offers a few buttons.
+//
+//   There is no synchronization point between the UI and capture. The capture thread
+//   only writes into a lock-free ring buffer and the UI collects every 100 ms, so no
+//   amount of UI slowness can stall the hook callback — and stalling it past 300 ms has
+//   Windows silently remove the hook (spec §19.1). The log cap follows the same
+//   reasoning: unbounded growth would eventually freeze the UI which, while it can no
+//   longer reach capture, would make the tool itself unusable.
 //
 // 包含的成员 / Members in this file:
-//   OnSourceInitialized  取得窗口句柄并挂上窗口过程钩子
-//   OnWindowMessage      接住 WM_INPUT
 //   OnDrainTick          定时排空缓冲区并刷新界面
 //   OnStartClicked / OnStopClicked / OnResetClicked / OnRefreshDevicesClicked / OnExportClicked
 // =============================================================================
 
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Windows;
-using System.Windows.Controls;
-using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Threading;
 using ScannerHelper.Diagnostics.Harness.Observation;
-using ScannerHelper.Win32;
 using ScannerHelper.Win32.Observation;
 
 namespace ScannerHelper.Diagnostics.Harness;
@@ -119,62 +115,11 @@ public partial class MainWindow : Window
         Closed += (_, _) => _session.Dispose();
     }
 
-    /// <summary>
-    /// 中文：
-    ///   窗口句柄已就绪时挂上窗口过程钩子。
-    ///
-    ///   WPF 的 Window 在此之前没有 HWND，而 RIDEV_INPUTSINK 注册和接收
-    ///   WM_INPUT 都需要一个真实的窗口句柄。所以这两件事都不能放在构造函数里。
-    /// English:
-    ///   Hooks the window procedure once the handle exists. A WPF Window has no HWND
-    ///   before this point, and both RIDEV_INPUTSINK registration and receiving WM_INPUT
-    ///   need a real one, so neither can happen in the constructor.
-    /// </summary>
-    protected override void OnSourceInitialized(EventArgs e)
-    {
-        base.OnSourceInitialized(e);
-
-        var source = (HwndSource)PresentationSource.FromVisual(this)!;
-        source.AddHook(OnWindowMessage);
-    }
-
-    /// <summary>
-    /// 中文：
-    ///   窗口过程钩子，只关心 WM_INPUT。
-    ///
-    ///   ★ 时间戳必须是认出消息之后做的**第一件事**。本工具唯一要测的就是
-    ///     两条通道的时差，那个差值可能只有几十微秒；时间戳每晚取一步，
-    ///     测出来的就多混进一分我们自己代码的耗时。
-    ///
-    ///   不把消息标记为已处理：本工具只是旁听，WM_INPUT 该怎么走还怎么走。
-    /// English:
-    ///   The window procedure hook, interested only in WM_INPUT.
-    ///
-    ///   The timestamp must be the first thing done after recognizing the message. The
-    ///   inter-channel delta this tool measures may be only tens of microseconds, and
-    ///   every step taken before the timestamp folds more of our own cost into it.
-    ///
-    ///   The message is not marked handled: this tool listens in and lets WM_INPUT
-    ///   proceed exactly as it would have.
-    /// </summary>
-    private IntPtr OnWindowMessage(
-        IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
-    {
-        if (msg == RawInputKeyboardListener.WindowMessage)
-        {
-            var timestamp = Stopwatch.GetTimestamp();
-            _session.HandleRawInput(lParam, timestamp);
-        }
-
-        return IntPtr.Zero;
-    }
-
     private void OnStartClicked(object sender, RoutedEventArgs e)
     {
         try
         {
-            var windowHandle = new WindowInteropHelper(this).Handle;
-            _session.Start(windowHandle);
+            _session.Start();
             _drainTimer.Start();
 
             StartButton.IsEnabled = false;
@@ -349,11 +294,24 @@ public partial class MainWindow : Window
         var unpairedRaw = pairing.UnpairedRawInputCount;
         var isClean = dropped == 0 && unpairedHook == 0 && unpairedRaw == 0;
 
+        var disagreements = pairing.VirtualKeyDisagreements;
+        var disagreementSummary = disagreements.Count == 0
+            ? "虚拟键码分歧 / VK mismatch  无 / none"
+            : "虚拟键码分歧 / VK mismatch\n"
+              + string.Join(
+                  "\n",
+                  disagreements
+                      .OrderBy(entry => entry.Key)
+                      .Select(entry => $"  钩子 0x{entry.Key:X2} ↔ Raw 0x{entry.Value:X2}"))
+              + "\n  → 关联必须按扫描码，不能按虚拟键码";
+
         ValidityText.Text =
             $"缓冲区丢弃 / dropped        {dropped}\n"
             + $"钩子未配对 / hook only      {unpairedHook}\n"
             + $"Raw 未配对 / raw only       {unpairedRaw}\n"
             + "\n"
+            + disagreementSummary
+            + "\n\n"
             + (isClean
                 ? "两条通道逐个事件对得上，数据完整。"
                 : "⚠️ 数据不完整。未配对不为零可能比时序本身更值得查——\n"

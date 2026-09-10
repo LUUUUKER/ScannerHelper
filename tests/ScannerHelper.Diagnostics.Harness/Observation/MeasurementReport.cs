@@ -89,6 +89,7 @@ public static class MeasurementReport
 
         AppendValidity(report, session, deltas.Length);
         AppendOrdering(report, session, deltas);
+        AppendVirtualKeyDisagreement(report, session);
         AppendDelta(report, deltas);
         AppendDevices(report, session);
         AppendAttachedKeyboards(report, session);
@@ -251,13 +252,108 @@ public static class MeasurementReport
     }
 
     /// <summary>
+    /// 中文：
+    ///   两条通道的虚拟键码是否一致。这一节是第一轮测量意外发现的，不在规格
+    ///   §4.3 原本的问题清单里，但它直接决定关联器怎么写。
+    /// English:
+    ///   Whether the channels agree on virtual key codes. This section came out of the
+    ///   first measurement run unplanned — it is not on spec §4.3's original question
+    ///   list — but it settles how the correlator must be written.
+    /// </summary>
+    private static void AppendVirtualKeyDisagreement(
+        StringBuilder report, ObservationSession session)
+    {
+        var disagreements = session.Pairing.VirtualKeyDisagreements;
+
+        report.AppendLine("## 2. 两条通道的虚拟键码是否一致 / Virtual-key agreement");
+        report.AppendLine();
+
+        if (disagreements.Count == 0)
+        {
+            report.AppendLine(
+                "本次观测中，两条通道对每一次按键报告的虚拟键码都相同。");
+            report.AppendLine();
+            report.AppendLine(
+                "⚠️ 但**不要**据此就用虚拟键码去做跨通道关联。这只说明本次按到的键"
+                + "恰好都不属于会分歧的那一类；只要按一次左 Shift 就可能出现分歧。"
+                + "扫描码在两条通道上始终一致，用它没有这个风险。");
+            report.AppendLine();
+            report.AppendLine(
+                "No disagreement was observed. Do not conclude that virtual keys are safe "
+                + "for cross-channel correlation: it only means no key of the disagreeing "
+                + "class happened to be pressed. Scan codes agree unconditionally.");
+            report.AppendLine();
+            return;
+        }
+
+        report.AppendLine(
+            "**观测到分歧。同一次物理按键，两条通道报出的虚拟键码不同。**");
+        report.AppendLine();
+        report.AppendLine("| 钩子报告 / Hook | Raw Input 报告 / Raw Input |");
+        report.AppendLine("|---|---|");
+
+        foreach (var (hookKey, rawKey) in disagreements.OrderBy(entry => entry.Key))
+        {
+            report.AppendLine(
+                $"| `0x{hookKey:X2}` {DescribeVirtualKey(hookKey)} "
+                + $"| `0x{rawKey:X2}` {DescribeVirtualKey(rawKey)} |");
+        }
+
+        report.AppendLine();
+        report.AppendLine("**这意味着什么 / What this means**");
+        report.AppendLine();
+        report.AppendLine(
+            "钩子会区分左右修饰键（`VK_LSHIFT` / `VK_RSHIFT`），Raw Input 只给通用码"
+            + "（`VK_SHIFT`）。两者的**扫描码始终相同**。");
+        report.AppendLine();
+        report.AppendLine(
+            "因此 `InputEventCorrelator` 必须按 **(扫描码, 扩展位, 按下/弹起)** 来把"
+            + "两条通道的事件对应起来，**绝不能用虚拟键码**。扩展位不能省——扫描码"
+            + "本身会重复，右 Ctrl 与左 Ctrl 的扫描码相同，只有它能区分左右。");
+        report.AppendLine();
+        report.AppendLine(
+            "> 这条是踩出来的，不是想出来的。本工具第一版按虚拟键码配对，"
+            + "结果所有修饰键在两条队列里各自堆积、永远配不上，报出 400 多个"
+            + "「未配对」事件。若这个坑留到 Task 4b 才踩，现场表现会是"
+            + "「扫码枪扫含大写字母的条码时，识别不出来源」——而那时要同时"
+            + "面对未验证的拦截逻辑和这个隐藏的配对错误，正是规格 §4.3 拆分"
+            + "4a 与 4b 所要避免的局面。");
+        report.AppendLine();
+        report.AppendLine(
+            "The hook distinguishes left and right modifiers while Raw Input reports the "
+            + "generic code; scan codes always match. InputEventCorrelator must therefore "
+            + "key on (scan code, extended flag, direction) and never on the virtual key. "
+            + "This was discovered by hitting it: the tool's first version paired on "
+            + "virtual keys and reported 400-odd unpaired modifier events.");
+        report.AppendLine();
+    }
+
+    /// <summary>
+    /// 中文：把虚拟键码渲染成人能认的名字，只覆盖会出现分歧的那几个修饰键。
+    /// English: Names the virtual keys involved in disagreements — the modifiers.
+    /// </summary>
+    private static string DescribeVirtualKey(ushort virtualKey) => virtualKey switch
+    {
+        0x10 => "VK_SHIFT",
+        0x11 => "VK_CONTROL",
+        0x12 => "VK_MENU",
+        0xA0 => "VK_LSHIFT",
+        0xA1 => "VK_RSHIFT",
+        0xA2 => "VK_LCONTROL",
+        0xA3 => "VK_RCONTROL",
+        0xA4 => "VK_LMENU",
+        0xA5 => "VK_RMENU",
+        _ => string.Empty,
+    };
+
+    /// <summary>
     /// 中文：第 2 问 —— 时差分布。4b 的等待窗口要照着尾部选，不是照着中位数选。
     /// English: Question 2 — the delta distribution. 4b's wait window is chosen from the
     ///          tail, not from the median.
     /// </summary>
     private static void AppendDelta(StringBuilder report, IReadOnlyCollection<double> deltas)
     {
-        report.AppendLine("## 2. 两条通道的时差分布 / Inter-channel delta");
+        report.AppendLine("## 3. 两条通道的时差分布 / Inter-channel delta");
         report.AppendLine();
         report.AppendLine(
             "时差 = Raw Input 时间戳 − 钩子时间戳。**正数表示钩子先到。**"
@@ -294,8 +390,27 @@ public static class MeasurementReport
             + "**可不可用**，取决于消息何时被取到，而不是它何时被产生。但读者"
             + "不能把这个数字当成硬件时延。");
         report.AppendLine();
-
-        return;
+        report.AppendLine(
+            "> **测量环境**：钩子与 `WM_INPUT` 都跑在一条专用线程上，那条线程只有"
+            + "一个仅消息窗口，只泵消息、不碰任何界面。这一点是必须的：第一轮把"
+            + "捕获放在界面线程上，界面每 100 毫秒重建一次列表控件，消息就排在"
+            + "那些工作后面，量到的时差于是变成了「界面有多卡」而不是通道本身的"
+            + "性质。");
+        report.AppendLine();
+        report.AppendLine(
+            "> 这同时是一条**产品设计要求**：产品也必须在一条专用的、什么别的事"
+            + "都不干的线程上泵 `WM_INPUT`。若那条线程兼做界面，身份到手的延迟"
+            + "会被自己的界面拖大——而 4b 的扣留窗口必须覆盖那个延迟，界面越卡，"
+            + "普通打字被扣留得越久。");
+        report.AppendLine();
+        report.AppendLine(
+            "> Measurement environment: both channels run on a dedicated thread owning a "
+            + "message-only window that pumps messages and touches no UI. This is required "
+            + "— with capture on the UI thread the first run measured how sluggish the UI "
+            + "was rather than a property of the channels. It is also a product design "
+            + "requirement: a thread that also drives a UI inflates how long identity takes "
+            + "to arrive, and 4b's withhold window must cover that.");
+        report.AppendLine();
     }
 
     /// <summary>
@@ -304,7 +419,7 @@ public static class MeasurementReport
     /// </summary>
     private static void AppendDevices(StringBuilder report, ObservationSession session)
     {
-        report.AppendLine("## 3. 各设备的输入特征 / Per-device input characteristics");
+        report.AppendLine("## 4. 各设备的输入特征 / Per-device input characteristics");
         report.AppendLine();
 
         if (session.Devices.Count == 0)
@@ -347,6 +462,20 @@ public static class MeasurementReport
             + "是两回事，不要互相推导。规格也提醒过：约 300 毫秒的扫描超时与"
             + "`LowLevelHooksTimeout` 的 300 毫秒数字相同但毫无关系。");
         report.AppendLine();
+        report.AppendLine(
+            "> **本表的时刻取自钩子那一侧，不是 Raw Input。** 设备身份只有 Raw Input "
+            + "知道，「这次按键什么时候发生」却只有钩子问得准——钩子回调是在输入"
+            + "派发路径上被同步调用的，而 `WM_INPUT` 要先排队再被消息循环取出。"
+            + "配对正好把两半凑齐：设备取自 Raw Input，时刻取自钩子。"
+            + "第一轮直接用 Raw Input 的时间戳，量到扫码枪段内间隔 p99 48 毫秒——"
+            + "扫码枪不可能有这种停顿，那是消息排队的时间。");
+        report.AppendLine();
+        report.AppendLine(
+            "> Times here come from the hook side, not Raw Input. Only Raw Input knows the "
+            + "device and only the hook answers \"when did this happen\" accurately, so "
+            + "pairing supplies both halves. The first run used Raw Input timestamps and "
+            + "measured a 48 ms within-burst p99 for the scanner — in fact queue latency.");
+        report.AppendLine();
     }
 
     /// <summary>
@@ -361,7 +490,7 @@ public static class MeasurementReport
     /// </summary>
     private static void AppendAttachedKeyboards(StringBuilder report, ObservationSession session)
     {
-        report.AppendLine("## 4. 当前连接的键盘类设备 / Attached keyboard-class devices");
+        report.AppendLine("## 5. 当前连接的键盘类设备 / Attached keyboard-class devices");
         report.AppendLine();
         report.AppendLine(
             "**用法**：重新插拔扫码枪、以及重启机器之后，各导出一份报告，"
@@ -409,7 +538,7 @@ public static class MeasurementReport
     /// </summary>
     private static void AppendOperatorNotes(StringBuilder report, string? operatorNotes)
     {
-        report.AppendLine("## 5. 人工观察记录 / Operator notes");
+        report.AppendLine("## 6. 人工观察记录 / Operator notes");
         report.AppendLine();
 
         if (string.IsNullOrWhiteSpace(operatorNotes))
@@ -439,14 +568,21 @@ public static class MeasurementReport
     /// </summary>
     private static void AppendOpenQuestions(StringBuilder report)
     {
-        report.AppendLine("## 6. 仍未回答 / Still open");
+        report.AppendLine("## 7. 仍未回答 / Still open");
         report.AppendLine();
         report.AppendLine(
             "- **这些数字尚未在试点机器上复现。** 事件时序是机器的性质，不是代码的"
             + "性质；开发机与现场机不是同一台硬件。在现场机器上重跑一轮之前，"
             + "本报告的每一个数字都只是暂定值。");
         report.AppendLine(
-            "- **设备身份跨重启是否稳定**，需要重启后再导出一份报告对比第 4 节。");
+            "- **设备身份跨重启是否稳定**，需要重启后再导出一份报告对比第 5 节。");
+        report.AppendLine(
+            "- **同一台物理设备是否会被枚举成多个 Raw Input 设备。** 第 5 节里出现"
+            + "`HID#ConvertedDevice` 这类条目时尤其要注意——那是 Windows 为 PS/2 设备"
+            + "生成的 HID 映射。若扫码枪也被枚举成不止一项（例如带 `&MI_01`、`&Col02` "
+            + "后缀的兄弟条目），只绑定其中一个句柄就可能漏掉另一部分事件，"
+            + "规格 §6 的绑定模型需要相应调整。判断方法：只用扫码枪扫码，看第 4 节"
+            + "里出现几台设备。");
         report.AppendLine(
             "- **拦截与重放是否可行**，属于 Task 4b。本次观测**没有**拦截任何事件，"
             + "因此对此不提供任何证据。规格 §4.3 把两段分开，正是为了避免在"

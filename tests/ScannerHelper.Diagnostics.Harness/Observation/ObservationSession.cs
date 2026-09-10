@@ -71,8 +71,20 @@ public sealed class ObservationSession : IDisposable
     public static readonly TimeSpan DrainInterval = TimeSpan.FromMilliseconds(100);
 
     private readonly ObservationBuffer _buffer = new();
-    private readonly LowLevelKeyboardHook _hook;
-    private readonly RawInputKeyboardListener _rawInput;
+
+    /// <summary>
+    /// 中文：捕获跑在一条专用线程上，那条线程只有一个仅消息窗口、只泵消息、
+    ///       不碰任何界面。第一轮把捕获放在界面线程上，扫码枪的段内间隔 p99
+    ///       量到了 48 毫秒——扫码枪不可能有这种停顿，那是界面刷新把消息挤到
+    ///       后面去的结果。详见 InputCaptureThread 的说明。
+    /// English: Capture runs on a dedicated thread owning one message-only window that
+    ///          pumps messages and touches no UI. With capture on the UI thread the
+    ///          first run measured a 48 ms p99 for the scanner's within-burst interval —
+    ///          impossible for a scanner, and caused by UI refresh pushing messages
+    ///          behind it. See InputCaptureThread.
+    /// </summary>
+    private readonly InputCaptureThread _capture;
+
     private readonly RawInputDeviceResolver _resolver = new();
     private readonly Dictionary<nint, DeviceActivity> _devices = [];
 
@@ -96,8 +108,7 @@ public sealed class ObservationSession : IDisposable
     /// </summary>
     public ObservationSession()
     {
-        _hook = new LowLevelKeyboardHook(_buffer);
-        _rawInput = new RawInputKeyboardListener(_buffer);
+        _capture = new InputCaptureThread(_buffer);
     }
 
     /// <summary>
@@ -134,60 +145,44 @@ public sealed class ObservationSession : IDisposable
     /// <summary>
     /// 中文：
     ///   开始观测。
-    ///   输入：windowHandle 用于接收 WM_INPUT 的窗口句柄。
-    ///   输出：无。
-    ///   步骤：
-    ///     1. 先注册 Raw Input，再安装钩子；
-    ///     2. 记下开始时刻。
+    ///   输入：无。输出：无。
     ///
-    ///   步骤 1 的顺序有意为之。若先装钩子，在 Raw Input 注册完成之前的那一小段
-    ///   时间里，钩子已经在记录事件，而这些事件永远等不到对家——它们会全部
-    ///   堆积成"未配对"，让一个本该为零、一旦不为零就该警觉的指标从一开始就
-    ///   带着噪声。反过来则不会：Raw Input 先就位，最多是它先记几条等钩子，
-    ///   而那几条会在钩子装好后正常配上。
+    ///   捕获线程会阻塞等待窗口与钩子就绪之后才返回，因此本方法返回时捕获
+    ///   确实已经开始——不会出现"以为在录、其实前几个按键丢了"的情况。
+    ///   安装失败会原样抛出 Win32 异常（最常见的原因是权限不匹配，
+    ///   规格 §2.1 假设 A2）。
     /// English:
-    ///   Starts observing on the given window.
-    ///   Steps: (1) register Raw Input first, then install the hook; (2) record the
-    ///   start time.
-    ///
-    ///   The order in step 1 is deliberate. Installing the hook first leaves a window in
-    ///   which it records events that can never find a counterpart, and those pile up as
-    ///   "unpaired" — putting noise into a metric that should read zero and be alarming
-    ///   when it does not. The reverse is harmless: Raw Input may record a few events
-    ///   ahead of the hook, and those pair up normally once the hook is in place.
+    ///   Starts observing. The capture thread blocks until its window and hook are
+    ///   ready before returning, so capture really has begun by the time this returns —
+    ///   there is no "thought it was recording while the first keystrokes were lost".
+    ///   Installation failures surface as the original Win32 exception; the usual cause
+    ///   is a privilege mismatch (spec §2.1, assumption A2).
     /// </summary>
-    public void Start(IntPtr windowHandle)
+    public void Start()
     {
         if (IsRunning)
         {
             return;
         }
 
-        // 步骤 1 / Step 1
-        _rawInput.Register(windowHandle);
-        _hook.Install();
+        _capture.Start();
 
-        // 步骤 2 / Step 2
         StartedAt = DateTimeOffset.Now;
         IsRunning = true;
     }
 
     /// <summary>
     /// 中文：
-    ///   停止观测，摘掉钩子。
+    ///   停止观测。捕获线程会在自己那一侧摘钩子、销毁窗口、注销窗口类，
+    ///   然后退出——钩子必须由安装它的线程卸载，窗口也必须由创建它的线程销毁。
     ///
-    ///   Raw Input 的注册不主动撤销：撤销要再调一次 RegisterRawInputDevices
-    ///   并带上 RIDEV_REMOVE，而多收几条不再处理的消息毫无代价，撤销失败反而
-    ///   要多一条错误路径。真正必须干净收尾的是钩子——它会拖慢**全系统**的
-    ///   每一次按键，留着不摘是不负责任的（规格 §19）。
+    ///   钩子会拖慢**全系统**的每一次按键，因此收尾必须干净（规格 §19）。
     /// English:
-    ///   Stops observing and removes the hook.
+    ///   Stops observing. The capture thread unhooks, destroys its window and
+    ///   unregisters its class on its own side before exiting — a hook must be removed
+    ///   by the thread that installed it and a window destroyed by its creator.
     ///
-    ///   The Raw Input registration is deliberately not torn down: doing so needs
-    ///   another RegisterRawInputDevices call with RIDEV_REMOVE, while receiving a few
-    ///   more messages nobody processes costs nothing and an unregister failure would
-    ///   only add an error path. The hook is what genuinely must be cleaned up — it
-    ///   slows every keystroke system-wide, and leaving it installed is irresponsible
+    ///   The hook slows every keystroke system-wide, so shutdown must be clean
     ///   (spec §19).
     /// </summary>
     public void Stop()
@@ -197,25 +192,9 @@ public sealed class ObservationSession : IDisposable
             return;
         }
 
-        _hook.Uninstall();
+        _capture.Stop();
         IsRunning = false;
     }
-
-    /// <summary>
-    /// 中文：
-    ///   处理一条 WM_INPUT。
-    ///   输入：rawInputHandle 消息的 lParam；timestamp 窗口过程在**最开头**
-    ///         取得的时间戳。
-    ///   输出：无。
-    ///   调用方必须在识别出 WM_INPUT 后立刻取时间戳再调用本方法，理由见
-    ///   RawInputKeyboardListener 的说明。
-    /// English:
-    ///   Handles one WM_INPUT. The caller must take the timestamp the moment it
-    ///   recognizes the message and before calling in; see RawInputKeyboardListener for
-    ///   why.
-    /// </summary>
-    public void HandleRawInput(IntPtr rawInputHandle, long timestamp)
-        => _rawInput.HandleRawInput(rawInputHandle, timestamp);
 
     /// <summary>
     /// 中文：
@@ -224,20 +203,35 @@ public sealed class ObservationSession : IDisposable
     ///   输出：本次取到的事件，按时间顺序，供界面追加到日志。
     ///   步骤：
     ///     1. 从环形缓冲区排空到临时数组；
-    ///     2. 逐个事件：Raw Input 通道的记入对应设备的活动；
-    ///     3. 逐个事件：交给配对器；
+    ///     2. 逐个事件交给配对器；
+    ///     3. 配成一对时，用**钩子那一侧的时间戳**记入对应设备的活动；
     ///     4. 返回取到的事件列表。
     ///
-    ///   步骤 2 只对 Raw Input 通道做，因为只有那条通道知道是哪台设备——
-    ///   这正是整个 4a 要研究的不对称性本身。
+    ///   ★ 步骤 3 必须等到配对之后，而且必须用钩子的时间戳。
+    ///
+    ///     设备身份只有 Raw Input 那条通道知道，"这次按键什么时候发生"却只有
+    ///     钩子那一侧问得准——钩子回调是在输入派发路径上被同步调用的，
+    ///     而 `WM_INPUT` 要先排队再被消息循环取出。配对正好把两半凑齐：
+    ///     设备取自 Raw Input，时刻取自钩子。
+    ///
+    ///     第一轮直接用 Raw Input 的时间戳算字符间隔，量到扫码枪段内 p99
+    ///     48 毫秒——扫码枪不可能有这种停顿，那是消息排队的时间。
     /// English:
     ///   Drains accumulated events and updates statistics, returning what was drained in
     ///   order for the UI log.
-    ///   Steps: (1) drain the ring buffer; (2) attribute Raw Input events to their
-    ///   device; (3) feed every event to the pairer; (4) return the list.
+    ///   Steps: (1) drain the ring buffer; (2) feed every event to the pairer; (3) on a
+    ///   completed pair, attribute it to its device using the *hook-side* timestamp;
+    ///   (4) return the list.
     ///
-    ///   Step 2 applies to the Raw Input channel alone, because only that channel knows
-    ///   the device — the very asymmetry 4a exists to study.
+    ///   Step 3 must wait for pairing and must use the hook timestamp. Only Raw Input
+    ///   knows the device, and only the hook side answers "when did this keystroke
+    ///   happen" accurately — the callback is invoked synchronously on the dispatch
+    ///   path while WM_INPUT queues first. Pairing supplies both halves: the device from
+    ///   Raw Input, the moment from the hook.
+    ///
+    ///   The first run computed intervals straight from Raw Input timestamps and
+    ///   measured a 48 ms within-burst p99 for the scanner — impossible for a scanner,
+    ///   and in fact message-queue latency.
     /// </summary>
     public IReadOnlyList<ObservedInputEvent> Drain()
     {
@@ -256,20 +250,22 @@ public sealed class ObservationSession : IDisposable
             drained.Add(observedEvent);
 
             // 步骤 2 / Step 2
-            if (observedEvent.Channel == InputChannel.RawInput)
+            var pair = Pairing.Accept(observedEvent);
+            if (pair is not { } completedPair)
             {
-                if (!_devices.TryGetValue(observedEvent.DeviceHandle, out var activity))
-                {
-                    activity = new DeviceActivity(
-                        observedEvent.DeviceHandle, _resolver.Resolve(observedEvent.DeviceHandle));
-                    _devices[observedEvent.DeviceHandle] = activity;
-                }
-
-                activity.Record(observedEvent.Timestamp, observedEvent.IsKeyUp);
+                continue;
             }
 
-            // 步骤 3 / Step 3
-            Pairing.Accept(observedEvent);
+            // 步骤 3 / Step 3 —— 设备取自 Raw Input，时刻取自钩子
+            // Device from Raw Input, moment from the hook
+            if (!_devices.TryGetValue(completedPair.DeviceHandle, out var activity))
+            {
+                activity = new DeviceActivity(
+                    completedPair.DeviceHandle, _resolver.Resolve(completedPair.DeviceHandle));
+                _devices[completedPair.DeviceHandle] = activity;
+            }
+
+            activity.Record(completedPair.HookTimestamp, completedPair.IsKeyUp);
         }
 
         // 步骤 4 / Step 4
@@ -327,7 +323,6 @@ public sealed class ObservationSession : IDisposable
     public void Dispose()
     {
         Stop();
-        _hook.Dispose();
-        _rawInput.Dispose();
+        _capture.Dispose();
     }
 }

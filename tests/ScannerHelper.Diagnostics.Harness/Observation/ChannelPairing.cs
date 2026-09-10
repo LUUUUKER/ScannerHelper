@@ -6,11 +6,26 @@
 //
 //   这是整个诊断工具的核心一步，也是最容易做错的一步。
 //
-//   ★ 配对依据：按 (虚拟键码, 按下还是弹起) 分组，组内先进先出。
+//   ★ 配对依据：按 (扫描码, 扩展位, 按下还是弹起) 分组，组内先进先出。
 //
 //     两条通道看到的是**同一串**物理按键，顺序一致、数量一致。所以对每一种
 //     按键身份各维护两个队列，一条通道来了事件就去另一条的队列里找对家：
 //     找到就配成一对，找不到就自己排队等着。
+//
+//     ★★ 身份里刻意**不含虚拟键码**，这是第一轮测量用四百多个"未配对"事件
+//       换来的教训。
+//
+//       实测日志：
+//         HOOK  LShift (2A) down     钩子报 VK_LSHIFT = 0xA0
+//         RAW   Shift  (2A) down     Raw Input 报 VK_SHIFT = 0x10
+//
+//       同一次按键，扫描码都是 0x2A，虚拟键码却不同——钩子区分左右修饰键，
+//       Raw Input 只给通用码。按虚拟键码分组的结果是所有修饰键在两条队列里
+//       各自堆积、永远配不上，第一轮因此报出 423 个"钩子未配对"和 422 个
+//       "Raw 未配对"，两个数几乎相等，正是同一批事件被劈成两半的形状。
+//
+//       扫描码则两条通道一致。扩展位必须一起比：扫描码本身会重复（右 Ctrl
+//       与左 Ctrl 的扫描码相同），只有加上它才能区分左右。
 //
 //     不按时间就近配对，是因为那正好会把要测的东西当成前提：若假定"时间最近
 //     的两个事件属于同一次按键"，测出来的时差必然很小——测量方法本身保证了
@@ -71,8 +86,38 @@ namespace ScannerHelper.Diagnostics.Harness.Observation;
 /// 中文：同一次物理按键在两条通道上的一对观测。
 /// English: One physical keystroke as observed on both channels.
 /// </summary>
-/// <param name="VirtualKey">中文：虚拟键码。 English: The virtual key code.</param>
+/// <param name="ScanCode">中文：硬件扫描码，两条通道一致。 English: The scan code, on which both channels agree.</param>
+/// <param name="HookVirtualKey">
+/// 中文：钩子报告的虚拟键码。
+/// English: The virtual key the hook reported.
+/// </param>
+/// <param name="RawInputVirtualKey">
+/// 中文：Raw Input 报告的虚拟键码。与 <paramref name="HookVirtualKey"/> 不同是
+///       **正常现象**，修饰键上必然如此——两者都记下来，才能把这件事作为
+///       一条发现写进报告，而不是当成配对出错。
+/// English: The virtual key Raw Input reported. Differing from
+///          <paramref name="HookVirtualKey"/> is normal and inevitable for modifiers.
+///          Recording both is what lets the report state it as a finding rather than
+///          mistake it for a pairing fault.
+/// </param>
 /// <param name="IsKeyUp">中文：是否为弹起。 English: Whether this is a key up.</param>
+/// <param name="HookTimestamp">
+/// 中文：钩子那一侧的时间戳。
+///
+///       ★ 需要"这次按键什么时候发生"时，一律用这一个，不要用 Raw Input 的。
+///         钩子回调是在输入派发路径上被**同步**调用的，而 `WM_INPUT` 要先排队
+///         再被消息循环取出，中间隔着调度延迟。字符间隔这类统计若用后者，
+///         量到的就掺着消息队列的等待时间——第一轮扫码枪段内间隔 p99 到 48 毫秒，
+///         正是这么来的。
+/// English: The hook-side timestamp.
+///
+///          Use this one whenever "when did this keystroke happen" is the question,
+///          never the Raw Input one. The hook callback is invoked synchronously on the
+///          input dispatch path, whereas WM_INPUT queues and waits for a message loop.
+///          Interval statistics built on the latter measure queue latency too — which
+///          is how the first run produced a 48 ms p99 for a scanner's within-burst
+///          interval.
+/// </param>
 /// <param name="DeviceHandle">
 /// 中文：产生该按键的设备句柄，来自 Raw Input 那一侧。
 /// English: The device that produced it, from the Raw Input side.
@@ -88,8 +133,11 @@ namespace ScannerHelper.Diagnostics.Harness.Observation;
 ///          decide, which makes spec §5.3's withhold-and-replay the only viable design.
 /// </param>
 public readonly record struct PairedObservation(
-    ushort VirtualKey,
+    ushort ScanCode,
+    ushort HookVirtualKey,
+    ushort RawInputVirtualKey,
     bool IsKeyUp,
+    long HookTimestamp,
     nint DeviceHandle,
     double DeltaMicroseconds);
 
@@ -107,7 +155,23 @@ public sealed class ChannelPairing
     ///   Events awaiting a counterpart, keyed by (virtual key, is-key-up), with one
     ///   waiting queue per channel.
     /// </summary>
-    private readonly Dictionary<(ushort VirtualKey, bool IsKeyUp), PendingEvents> _pending = [];
+    private readonly Dictionary<(ushort ScanCode, bool IsExtended, bool IsKeyUp), PendingEvents>
+        _pending = [];
+
+    /// <summary>
+    /// 中文：观测到的「同一次按键、两条通道虚拟键码不同」的组合，
+    ///       键是钩子报的码，值是 Raw Input 报的码。
+    ///
+    ///       这不是错误统计，而是一条**发现**。它直接决定关联器的实现：
+    ///       只要这张表非空，就证明虚拟键码不能用来跨通道对应事件。
+    /// English:
+    ///   The observed combinations where the two channels reported different virtual
+    ///   keys for one keystroke, mapping the hook's code to Raw Input's.
+    ///
+    ///   Not an error count but a finding. It settles the correlator's implementation:
+    ///   a non-empty table proves virtual keys cannot match events across channels.
+    /// </summary>
+    private readonly Dictionary<ushort, ushort> _virtualKeyDisagreements = [];
 
     /// <summary>
     /// 中文：已配对的观测。
@@ -140,6 +204,15 @@ public sealed class ChannelPairing
     /// English: How often Raw Input arrived first.
     /// </summary>
     public int RawInputFirstCount { get; private set; }
+
+    /// <summary>
+    /// 中文：两条通道虚拟键码不一致的组合：(钩子的码, Raw Input 的码)。
+    ///       非空即证明关联器必须按扫描码而不是虚拟键码来对应事件。
+    /// English: Combinations where the channels disagreed on the virtual key, as
+    ///          (hook code, Raw Input code). Non-empty proves the correlator must match
+    ///          on scan code rather than virtual key.
+    /// </summary>
+    public IReadOnlyDictionary<ushort, ushort> VirtualKeyDisagreements => _virtualKeyDisagreements;
 
     /// <summary>
     /// 中文：
@@ -178,8 +251,9 @@ public sealed class ChannelPairing
             return null;
         }
 
-        // 步骤 2 / Step 2
-        var identity = (observedEvent.VirtualKey, observedEvent.IsKeyUp);
+        // 步骤 2 / Step 2 —— 按扫描码而非虚拟键码，理由见文件头
+        // Keyed on scan code, not virtual key; see the file header
+        var identity = observedEvent.PairingIdentity;
         if (!_pending.TryGetValue(identity, out var pending))
         {
             pending = new PendingEvents();
@@ -214,9 +288,20 @@ public sealed class ChannelPairing
             RawInputFirstCount++;
         }
 
+        // 两条通道对同一次按键给出了不同的虚拟键码——记下来，这是一条发现。
+        // The channels reported different virtual keys for one keystroke — record it,
+        // because it is a finding.
+        if (hookEvent.VirtualKey != rawInputEvent.VirtualKey)
+        {
+            _virtualKeyDisagreements[hookEvent.VirtualKey] = rawInputEvent.VirtualKey;
+        }
+
         var pair = new PairedObservation(
-            VirtualKey: observedEvent.VirtualKey,
+            ScanCode: observedEvent.ScanCode,
+            HookVirtualKey: hookEvent.VirtualKey,
+            RawInputVirtualKey: rawInputEvent.VirtualKey,
             IsKeyUp: observedEvent.IsKeyUp,
+            HookTimestamp: hookEvent.Timestamp,
             DeviceHandle: rawInputEvent.DeviceHandle,
             DeltaMicroseconds: deltaMicroseconds);
 
@@ -231,6 +316,7 @@ public sealed class ChannelPairing
     public void Reset()
     {
         _pending.Clear();
+        _virtualKeyDisagreements.Clear();
         Pairs.Clear();
         HookFirstCount = 0;
         RawInputFirstCount = 0;

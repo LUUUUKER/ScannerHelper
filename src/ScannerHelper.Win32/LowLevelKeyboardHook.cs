@@ -237,6 +237,7 @@ public sealed class LowLevelKeyboardHook : IDisposable
                 Timestamp: timestamp,
                 VirtualKey: (ushort)keyEvent.vkCode,
                 ScanCode: (ushort)keyEvent.scanCode,
+                IsExtended: (keyEvent.flags & KeyboardHookNative.LLKHF_EXTENDED) != 0,
                 IsKeyUp: (keyEvent.flags & KeyboardHookNative.LLKHF_UP) != 0,
                 IsInjected: (keyEvent.flags & injectedFlags) != 0,
 
