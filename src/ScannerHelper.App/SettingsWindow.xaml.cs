@@ -130,6 +130,8 @@ public partial class SettingsWindow : Window
         CaptureGroupBox.Text = parsing.CaptureGroupIndex.ToString(CultureInfo.InvariantCulture);
 
         AppendEnterCheck.IsChecked = settings.AppendEnterAfterScan;
+        ModeSoundCheck.IsChecked = settings.ModeSwitchSoundEnabled;
+        ErrorSoundCheck.IsChecked = settings.ErrorSoundEnabled;
         StartWithWindowsCheck.IsChecked = settings.StartWithWindows;
 
         UpdateRulePanels();
@@ -309,6 +311,8 @@ public partial class SettingsWindow : Window
         settings.Language = Localizer.ToPersistedValue(Localizer.Current);
         settings.SkuParsing = parsing;
         settings.AppendEnterAfterScan = AppendEnterCheck.IsChecked == true;
+        settings.ModeSwitchSoundEnabled = ModeSoundCheck.IsChecked == true;
+        settings.ErrorSoundEnabled = ErrorSoundCheck.IsChecked == true;
         settings.SerialPort.PortName = PortCombo.SelectedItem as string;
         settings.SerialPort.BaudRate = int.Parse(
             (string)((ComboBoxItem)BaudCombo.SelectedItem).Content, CultureInfo.InvariantCulture);

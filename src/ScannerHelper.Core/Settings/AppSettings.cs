@@ -140,21 +140,57 @@ public sealed class AppSettings
     public bool StartWithWindows { get; set; }
 
     /// <summary>
-    /// 中文：模式切换提示音，默认开启（规格 §7）。
-    ///       SN→SKU 与 SKU→SN 应当可听地区分。
-    /// English: Mode-change sound; on by default (spec §7). SN→SKU and SKU→SN should
-    ///          be audibly distinguishable.
+    /// 中文：
+    ///   模式切换提示音，**默认关闭**（决策 D-28）。
+    ///   切到 SN 是低音，切到 SKU 是高音，各响一声。
+    ///
+    ///   ★ 规格 §7 原本写的是"默认出声"，D-28 改成默认关闭。
+    ///
+    ///     理由来自实际使用：仓库里常年有别的声音，而一个每次切模式都响的程序，
+    ///     在工人自己没要求的情况下就是噪声——被无视的提示音等于没有提示音，
+    ///     还顺带让人对这个程序发出的**所有**声音都变得不敏感，包括真正要紧的
+    ///     那一个（出错）。
+    ///
+    ///     默认安静、要用的人自己打开，比默认吵闹、嫌吵的人自己去关，更能让
+    ///     "响了"这件事保持分量。
+    /// English:
+    ///   The mode-change sound, off by default (decision D-28). One tone: low into SN, high into
+    ///   SKU.
+    ///
+    ///   Spec §7 originally had it on by default; D-28 turns it off. The reason comes from use: a
+    ///   warehouse is never quiet, and a program that beeps on every mode change without being
+    ///   asked is noise — an ignored sound is no sound at all, and it also dulls the operator to
+    ///   every sound this program makes, including the one that matters (an error).
+    ///
+    ///   Silent by default with the people who want it turning it on keeps "it beeped" meaningful,
+    ///   in a way that loud by default with the annoyed turning it off does not.
     /// </summary>
-    public bool ModeSwitchSoundEnabled { get; set; } = true;
+    public bool ModeSwitchSoundEnabled { get; set; }
 
     /// <summary>
-    /// 中文：错误提示音，默认开启（规格 §10）。错误必须有独立于模式切换音的
-    ///       声音——工人可能正低头看货，只能靠听。
-    /// English: Error sound; on by default (spec §10). Errors need a sound distinct
-    ///          from the mode change — the operator may be looking at goods rather
-    ///          than the screen and has only hearing to go on.
+    /// 中文：
+    ///   错误提示音，**默认关闭**（决策 D-28）。
+    ///
+    ///   ★ 它和模式音一起默认关掉，理由是同一个：默认安静。
+    ///
+    ///     但两者的分量并不相同——出错时工人可能正低头看货，屏幕上的红色面板
+    ///     他看不到。所以设置界面里这一条应当排在模式音后面并单独成项，让想开
+    ///     声音的人可以只开这一个：**要紧的那一声，不该被一堆不要紧的淹掉。**
+    ///
+    ///   声音关着并不影响告知：出错时整块面板变红、带白色斜条纹、Compact 会自动
+    ///   展开成 Full（规格 §11.7）。声音是辅助通道，不是唯一通道。
+    /// English:
+    ///   The error sound, off by default (decision D-28), for the same reason as the mode sound.
+    ///
+    ///   The two do not carry equal weight, though: during an error the operator may be looking at
+    ///   goods and cannot see the red panel. So the settings list them separately with this one
+    ///   after the mode sound, letting somebody enable only this — the sound that matters should
+    ///   not be drowned out by the ones that do not.
+    ///
+    ///   Being off does not weaken the notification: the panel turns red with a hazard stripe and
+    ///   Compact expands to Full (spec §11.7). Sound is the secondary channel, not the only one.
     /// </summary>
-    public bool ErrorSoundEnabled { get; set; } = true;
+    public bool ErrorSoundEnabled { get; set; }
 
     /// <summary>
     /// 中文：是否记住窗口位置，默认开启（规格 §11.5）。

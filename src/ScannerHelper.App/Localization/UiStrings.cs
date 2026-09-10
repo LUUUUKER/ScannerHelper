@@ -157,6 +157,15 @@ public static class UiStrings
         ["SettingsAppendEnter"] = "Press Enter after each scan",
         ["SettingsAppendEnterHint"] =
             "Off by default. Turn it on only if the page needs Enter to submit or move on.",
+        ["SettingsSound"] = "Sound",
+        ["SettingsModeSound"] = "Beep when the mode changes",
+        ["SettingsModeSoundHint"] =
+            "One tone: low for SN, high for SKU. Off by default — a warehouse is never quiet, and a"
+            + " sound nobody asked for is noise.",
+        ["SettingsErrorSound"] = "Beep when a scan is not sent",
+        ["SettingsErrorSoundHint"] =
+            "The one worth hearing: during an error you may be looking at the goods rather than the"
+            + " screen.",
         ["SettingsStartWithWindows"] = "Start with Windows",
         ["SettingsSave"] = "Save",
         ["SettingsCancel"] = "Cancel",
@@ -240,6 +249,11 @@ public static class UiStrings
         ["SettingsOutput"] = "输出",
         ["SettingsAppendEnter"] = "每枪之后按一次回车",
         ["SettingsAppendEnterHint"] = "默认关闭。只有当网页需要回车才提交或跳到下一格时才打开。",
+        ["SettingsSound"] = "声音",
+        ["SettingsModeSound"] = "切换模式时响一声",
+        ["SettingsModeSoundHint"] = "一声：SN 低音、SKU 高音。默认关闭——仓库本来就不安静，没人要求的提示音就是噪声。",
+        ["SettingsErrorSound"] = "一枪没发出去时响一声",
+        ["SettingsErrorSoundHint"] = "这一声最值得开：出错时你可能正低头看货，看不到屏幕上的红色。",
         ["SettingsStartWithWindows"] = "开机自动启动",
         ["SettingsSave"] = "保存",
         ["SettingsCancel"] = "取消",

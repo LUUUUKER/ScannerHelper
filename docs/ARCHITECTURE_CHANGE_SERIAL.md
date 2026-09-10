@@ -208,3 +208,29 @@ LAPTOP-AI4MH002 上实测：
 而「让人从三个选项里挑一个」只会多出一个可以填错的地方——填错的表现是收不到
 任何一枪，而那看起来和「串口方案不行」一模一样。
 
+### D-28：提示音默认关闭，且模式音只响一声（已定，2026-09-10）
+
+**取代规格 §7 的「切换模式时默认出声」。**
+
+- 两种提示音（模式切换、一枪没发出去）**默认都关闭**，设置里可以分别打开。
+- 模式音从「升调/降调两声」改成**一声**：SN 低音（523 Hz），SKU 高音（1046 Hz），
+  相差一个八度。
+
+默认关闭的理由：仓库本来就不安静。一个没人要求就每次切模式都响的程序，发出的是
+噪声——而被无视的提示音不只是没用，它会让人对这个程序发出的**所有**声音都变得
+不敏感，包括真正要紧的那一声（出错）。默认安静、要用的人自己打开，比默认吵闹、
+嫌吵的人自己去关，更能让「响了」这件事保持分量。
+
+改成一声的理由来自实际使用：两声要占掉两百多毫秒，工人还没听完就已经在扫下一枪
+了，而两组两声在忙起来的时候听着差不多。单声的音高是**瞬间**可辨的，不需要听完
+一个序列再做比较；八度这个间隔在任何嘈杂环境里都分得开，也不需要有音乐训练。
+
+声音关着并不削弱告知能力：出错时整块面板变红、带白色斜条纹、Compact 会自动展开
+成 Full（规格 §11.7）。声音始终是辅助通道，不是唯一通道。
+
+**D-28 supersedes spec §7's "play a short mode-change sound by default".** Both sounds are off by
+default and separately switchable; the mode sound became a single tone, low for SN and high for SKU
+an octave apart. A warehouse is never quiet, and an unrequested beep on every mode change is noise —
+an ignored sound also dulls the operator to every sound this program makes, including the one that
+matters. Two tones cost over two hundred milliseconds and blur together when busy, while a single
+pitch is recognizable instantly.

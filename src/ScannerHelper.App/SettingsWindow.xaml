@@ -174,7 +174,20 @@
                            Foreground="{StaticResource MutedTextBrush}"
                            Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsAppendEnterHint]}" />
 
-                <CheckBox x:Name="StartWithWindowsCheck" Margin="0,14,0,0"
+                <TextBlock FontWeight="SemiBold" Margin="0,18,0,6"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsSound]}" />
+                <CheckBox x:Name="ModeSoundCheck"
+                          Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsModeSound]}" />
+                <TextBlock Margin="22,4,0,0" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsModeSoundHint]}" />
+                <CheckBox x:Name="ErrorSoundCheck" Margin="0,10,0,0"
+                          Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsErrorSound]}" />
+                <TextBlock Margin="22,4,0,0" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsErrorSoundHint]}" />
+
+                <CheckBox x:Name="StartWithWindowsCheck" Margin="0,18,0,0"
                           Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsStartWithWindows]}" />
 
             </StackPanel>
