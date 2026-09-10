@@ -29,6 +29,20 @@
                             Click="OnResetClicked" />
                     <Button x:Name="RefreshDevicesButton" Content="重新枚举设备 / Re-enumerate" Width="180" Height="28"
                             Margin="8,0,0,0" Click="OnRefreshDevicesClicked" />
+                    <Border Width="1" Background="#D0D0D0" Margin="12,2,12,2" />
+
+                    <!--
+                        中文：通往 4b 的门。刻意做成另一个窗口，而不是本窗口的一个标签页：
+                              本窗口的安全性质是「没有任何一条通向吞掉按键的代码路径」，
+                              把会吞按键的东西放进同一个窗口，那句话立刻就不成立了。
+                        English: The door to 4b. Deliberately another window rather than a tab
+                                 here: this window's safety property is "no code path swallows a
+                                 keystroke", and putting something that swallows into the same
+                                 window would void that sentence immediately.
+                    -->
+                    <Button x:Name="InterceptionButton" Content="⚠ 打开拦截关卡 / Interception (4b)"
+                            Width="230" Height="28" Click="OnInterceptionClicked" />
+
                     <TextBlock x:Name="StatusText" VerticalAlignment="Center" Margin="16,0,0,0"
                                Text="未开始 / Not started" />
                 </StackPanel>

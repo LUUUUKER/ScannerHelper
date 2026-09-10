@@ -1,0 +1,243 @@
+<Window x:Class="ScannerHelper.Diagnostics.Harness.InterceptionWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Scanner Helper — Task 4b 输入拦截关卡 / Input Interception Hard Gate"
+        Width="1280" Height="820" MinWidth="1000" MinHeight="680"
+        Closing="OnWindowClosing">
+
+    <!--
+        中文：
+          这个窗口和 4a 那个不一样：它会**真的吞掉按键**。
+
+          ★ 因此布局的第一原则是「逃生通道永远在手边」。
+            顶部横幅说明风险；停止与暂停两个按钮固定在控制条上、任何时候都
+            可点，并且用鼠标就能点到（规格 §5.7 要求安全阀鼠标可达，因为
+            出问题时键盘正是坏掉的那个东西，而笔记本工位没有备用键盘可插）。
+
+          ★ 第二原则是「不勾选就不启用」。
+            启用拦截需要显式勾一个复选框，而且默认不绑定任何扫码枪——
+            不绑定时什么都不吞，这是安全的那一侧。
+
+          布局自上而下就是操作顺序：
+            警告 → 选设备并启用 → 在测试框里做那九条 → 逐条打钩 → 导出。
+        English:
+          Unlike the 4a window, this one genuinely swallows keystrokes.
+
+          The first layout principle is therefore that the escape route is always at hand: the
+          banner states the risk, and Stop and Pause sit permanently on the control bar,
+          clickable at any moment and reachable with the mouse alone (spec §5.7 requires the
+          valve to be mouse-reachable, because when things go wrong the keyboard is the broken
+          thing and a laptop workstation has no spare to plug in).
+
+          The second is that nothing is enabled unticked: enabling interception requires an
+          explicit checkbox, and no scanner is bound by default — unbound swallows nothing,
+          which is the safe side.
+
+          Top to bottom is the order of operations: warning, pick a device and enable, exercise
+          the nine items in the test box, tick them off, export.
+    -->
+
+    <DockPanel Margin="10">
+
+        <!-- 警告横幅 / Warning banner -->
+        <Border DockPanel.Dock="Top" Background="#FFF4E5" BorderBrush="#E8A33D"
+                BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,8">
+            <StackPanel>
+                <TextBlock FontWeight="Bold" Foreground="#8A4B08"
+                           Text="⚠ 这个窗口会真的吞掉按键 / This window really does swallow keystrokes" />
+                <TextBlock TextWrapping="Wrap" Margin="0,4,0,0" Foreground="#5A3A10"
+                           Text="绑定扫码枪之后，键盘输入会被暂时扣留再补发，扫码枪的内容会被拦下。出问题时：点「暂停」放行一切，或点「停止拦截」。两个按钮用鼠标就能点到——键盘可能正是坏掉的那一个。未绑定扫码枪时什么都不会被吞掉。" />
+                <TextBlock TextWrapping="Wrap" Margin="0,4,0,0" Foreground="#5A3A10" FontSize="11"
+                           Text="Once a scanner is bound, keystrokes are briefly withheld and replayed, and scanner content is intercepted. If anything goes wrong: click Pause to let everything through, or Stop. Both are reachable with the mouse alone — the keyboard may be the broken thing. Nothing is swallowed while no scanner is bound." />
+            </StackPanel>
+        </Border>
+
+        <!-- 控制条 / Controls -->
+        <Border DockPanel.Dock="Top" BorderBrush="#D0D0D0" BorderThickness="0,0,0,1"
+                Padding="0,0,0,8" Margin="0,0,0,8">
+            <StackPanel>
+
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="扫码枪 / Scanner:" VerticalAlignment="Center" />
+                    <ComboBox x:Name="DeviceCombo" Width="330" Height="26" Margin="6,0,0,0"
+                              DisplayMemberPath="Label" />
+                    <Button x:Name="RefreshDevicesButton" Content="重新枚举 / Re-enumerate"
+                            Width="150" Height="26" Margin="6,0,0,0" Click="OnRefreshDevicesClicked" />
+                    <Button x:Name="BindButton" Content="绑定 / Bind" Width="110" Height="26"
+                            Margin="6,0,0,0" Click="OnBindClicked" IsEnabled="False" />
+                    <Button x:Name="UnbindButton" Content="解绑 / Unbind" Width="110" Height="26"
+                            Margin="6,0,0,0" Click="OnUnbindClicked" IsEnabled="False" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <CheckBox x:Name="AcknowledgeCheck" VerticalAlignment="Center"
+                              Content="我明白拦截会真的吞掉按键 / I understand this swallows keystrokes"
+                              Checked="OnAcknowledgeChanged" Unchecked="OnAcknowledgeChanged" />
+                    <Button x:Name="StartButton" Content="启用拦截 / Start" Width="140" Height="28"
+                            Margin="12,0,0,0" Click="OnStartClicked" IsEnabled="False" />
+                    <Button x:Name="StopButton" Content="停止拦截 / Stop" Width="140" Height="28"
+                            Margin="6,0,0,0" Click="OnStopClicked" IsEnabled="False" />
+                    <Border Width="1" Background="#D0D0D0" Margin="12,2,12,2" />
+                    <Button x:Name="PauseButton" Content="暂停 / Pause" Width="120" Height="28"
+                            Click="OnPauseClicked" IsEnabled="False" />
+                    <Button x:Name="ResumeButton" Content="恢复 / Resume" Width="120" Height="28"
+                            Margin="6,0,0,0" Click="OnResumeClicked" IsEnabled="False" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <TextBlock Text="模式 / Mode:" VerticalAlignment="Center" />
+                    <TextBlock x:Name="ModeText" Text="SN" FontWeight="Bold" Margin="6,0,0,0"
+                               VerticalAlignment="Center" />
+                    <Button x:Name="ToggleModeButton" Content="切换 SN/SKU / Toggle" Width="170" Height="26"
+                            Margin="10,0,0,0" Click="OnToggleModeClicked" />
+                    <CheckBox x:Name="AppendEnterCheck" VerticalAlignment="Center" Margin="16,0,0,0"
+                              Content="扫描后补回车 / Append Enter (规格 §10，默认关)"
+                              Checked="OnAppendEnterChanged" Unchecked="OnAppendEnterChanged" />
+                    <Border Width="1" Background="#D0D0D0" Margin="12,2,12,2" />
+                    <Button x:Name="ForceSendButton" Content="强制发送 / Force Send (F10)" Width="200" Height="26"
+                            Click="OnForceSendClicked" IsEnabled="False" />
+                    <Button x:Name="CancelButton" Content="取消 / Cancel (Esc)" Width="150" Height="26"
+                            Margin="6,0,0,0" Click="OnCancelClicked" IsEnabled="False" />
+                </StackPanel>
+
+            </StackPanel>
+        </Border>
+
+        <!-- 底部：导出 / Bottom: export -->
+        <Border DockPanel.Dock="Bottom" BorderBrush="#D0D0D0" BorderThickness="0,1,0,0"
+                Padding="0,8,0,0" Margin="0,8,0,0">
+            <StackPanel Orientation="Horizontal">
+                <TextBlock Text="机器与条件 / Machine and conditions:" VerticalAlignment="Center" />
+                <TextBox x:Name="MachineText" Width="520" Height="26" Margin="6,0,0,0"
+                         VerticalContentAlignment="Center" />
+                <Button x:Name="ExportButton" Content="导出关卡报告 / Export gate report"
+                        Width="220" Height="26" Margin="10,0,0,0" Click="OnExportClicked" />
+                <TextBlock x:Name="GateVerdictText" Margin="14,0,0,0" VerticalAlignment="Center"
+                           FontWeight="Bold" Text="硬性关卡：未通过 / Hard gate: not passed"
+                           Foreground="#B00020" />
+            </StackPanel>
+        </Border>
+
+        <!-- 主体三列 / Three columns -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.15*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="1*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="1.3*" />
+            </Grid.ColumnDefinitions>
+
+            <!-- 左：测试输入框 + 扫描结局 / Left: test input and scan outcomes -->
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="测试输入框 / Test input — 这里就是「业务软件」" />
+                <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" FontSize="11" Foreground="#555"
+                           Text="第 3~7 条都在这里验：打字、按住 Shift、开 CapsLock、扫码。焦点必须在这个框里。" />
+                <TextBox x:Name="TestInput" DockPanel.Dock="Top" Height="150" Margin="0,4,0,0"
+                         AcceptsReturn="True" TextWrapping="Wrap" FontSize="14"
+                         FontFamily="Consolas, Courier New, monospace"
+                         VerticalScrollBarVisibility="Auto" />
+                <Button DockPanel.Dock="Top" Content="清空测试框 / Clear" Width="140" Height="24"
+                        HorizontalAlignment="Left" Margin="0,4,0,0" Click="OnClearInputClicked" />
+
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="扫描结局 / Scan outcomes" />
+                <ListView x:Name="ScanLogView" FontSize="11"
+                          FontFamily="Consolas, Courier New, monospace">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="时刻 / Time" Width="76"
+                                            DisplayMemberBinding="{Binding Time}" />
+                            <GridViewColumn Header="模式" Width="46"
+                                            DisplayMemberBinding="{Binding Mode}" />
+                            <GridViewColumn Header="原始码 / Raw" Width="150"
+                                            DisplayMemberBinding="{Binding RawCode}" />
+                            <GridViewColumn Header="结局 / Result" Width="260"
+                                            DisplayMemberBinding="{Binding Result}" />
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <!-- 中：实时状态 / Middle: live state -->
+            <DockPanel Grid.Column="2">
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="实时状态 / Live state" />
+                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" x:Name="StateBorder"
+                        Background="#F6F6F6">
+                    <TextBlock x:Name="StateText" FontFamily="Consolas, Courier New, monospace"
+                               FontSize="12" TextWrapping="Wrap" Text="—" />
+                </Border>
+
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="计数 / Counters" />
+                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" Background="#F6F6F6">
+                    <TextBlock x:Name="CountersText" FontFamily="Consolas, Courier New, monospace"
+                               FontSize="12" TextWrapping="Wrap" Text="—" />
+                </Border>
+
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="钩子回调耗时 / Hook callback cost" />
+                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" x:Name="BudgetBorder"
+                        Background="#F6F6F6">
+                    <TextBlock x:Name="BudgetText" FontFamily="Consolas, Courier New, monospace"
+                               FontSize="12" TextWrapping="Wrap" Text="—" />
+                </Border>
+
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="异常 / Faults" />
+                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" x:Name="FaultBorder"
+                        Background="#F6F6F6">
+                    <TextBlock x:Name="FaultText" FontFamily="Consolas, Courier New, monospace"
+                               FontSize="12" TextWrapping="Wrap" Text="—" />
+                </Border>
+
+                <Border />
+            </DockPanel>
+
+            <GridSplitter Grid.Column="3" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <!-- 右：九条验收项 / Right: the nine acceptance items -->
+            <DockPanel Grid.Column="4">
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="Task 4b 验收项 / Acceptance items — 第 2~6 条是硬性关卡" />
+                <TextBlock DockPanel.Dock="Top" TextWrapping="Wrap" FontSize="11" Foreground="#555"
+                           Text="未测与失败同等对待：没人验过的规则，对工人的风险和验失败的一样。" />
+
+                <ScrollViewer VerticalScrollBarVisibility="Auto" Margin="0,4,0,0">
+                    <ItemsControl x:Name="GateItemsControl">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border BorderBrush="#E0E0E0" BorderThickness="1" CornerRadius="3"
+                                        Padding="8" Margin="0,0,0,6">
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding DisplayTitle}" TextWrapping="Wrap"
+                                                   FontWeight="SemiBold" FontSize="12" />
+                                        <TextBlock Text="{Binding HowTo}" TextWrapping="Wrap"
+                                                   FontSize="11" Foreground="#555" Margin="0,3,0,0" />
+                                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                                            <RadioButton Content="未测" GroupName="{Binding Number}"
+                                                         IsChecked="{Binding Result, Converter={StaticResource GateResultConverter}, ConverterParameter=NotTested}" />
+                                            <RadioButton Content="通过" Margin="10,0,0,0" GroupName="{Binding Number}"
+                                                         IsChecked="{Binding Result, Converter={StaticResource GateResultConverter}, ConverterParameter=Passed}" />
+                                            <RadioButton Content="失败" Margin="10,0,0,0" GroupName="{Binding Number}"
+                                                         IsChecked="{Binding Result, Converter={StaticResource GateResultConverter}, ConverterParameter=Failed}" />
+                                            <TextBox Text="{Binding Note, UpdateSourceTrigger=PropertyChanged}"
+                                                     Width="230" Height="22" Margin="10,0,0,0"
+                                                     VerticalContentAlignment="Center"
+                                                     ToolTip="备注：失败时把观察到的现象写下来 / Note what you observed" />
+                                        </StackPanel>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </DockPanel>
+
+        </Grid>
+    </DockPanel>
+</Window>

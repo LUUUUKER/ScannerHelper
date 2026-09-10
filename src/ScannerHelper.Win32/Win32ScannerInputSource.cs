@@ -199,6 +199,11 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     private RawInputKeyboardListener? _rawInput;
 
     private long _boundDeviceHandle;
+    private long _swallowedCount;
+    private long _passedThroughCount;
+    private long _replayedCount;
+    private long _rawInputCount;
+    private long _scanCount;
     private long _maximumHookCallbackTicks;
     private long _hookCallbackBudgetExceededCount;
     private long _faultCount;
@@ -234,6 +239,7 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
         _coordinator = coordinator;
         _correlator = correlator;
         _coordinator.ReplayRequested += OnReplayRequested;
+        _coordinator.ScanProcessed += OnScanProcessed;
 
         _host = new MessageOnlyCaptureHost(this, "ScannerHelper scanner input");
     }
@@ -282,6 +288,49 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     ///          is swallowed.
     /// </summary>
     public bool IsBound => Interlocked.Read(ref _boundDeviceHandle) != 0;
+
+    /// <summary>
+    /// 中文：
+    ///   被吞掉的按键数（规格 §5.4）。
+    ///
+    ///   ★ 这个数字和 <see cref="ReplayedCount"/> 要一起看。吞掉本身不是问题，
+    ///     吞了不补才是。扫码枪的字符吞掉就完了（那正是目的）；普通键盘的
+    ///     按键吞掉之后必须出现在补发计数里。
+    /// English:
+    ///   How many keystrokes were swallowed (spec §5.4).
+    ///
+    ///   Read it together with <see cref="ReplayedCount"/>. Swallowing is not the problem;
+    ///   swallowing without replaying is. A scanner's characters are swallowed and that is the
+    ///   point, but an ordinary keyboard's keystroke must afterwards show up in the replay
+    ///   count.
+    /// </summary>
+    public long SwallowedCount => Interlocked.Read(ref _swallowedCount);
+
+    /// <summary>
+    /// 中文：原样放行的按键数。
+    /// English: How many keystrokes passed through untouched.
+    /// </summary>
+    public long PassedThroughCount => Interlocked.Read(ref _passedThroughCount);
+
+    /// <summary>
+    /// 中文：补发出去的按键数。
+    /// English: How many keystrokes were replayed.
+    /// </summary>
+    public long ReplayedCount => Interlocked.Read(ref _replayedCount);
+
+    /// <summary>
+    /// 中文：收到的 Raw Input 事件数。它与钩子事件数差得太多，说明两条通道
+    ///       不同步，关联的可靠性就无从谈起。
+    /// English: How many raw-input events arrived. A large gap between this and the hook's
+    ///          count means the channels are out of step and correlation cannot be trusted.
+    /// </summary>
+    public long RawInputCount => Interlocked.Read(ref _rawInputCount);
+
+    /// <summary>
+    /// 中文：处理完毕的扫描次数（含失败）。
+    /// English: How many scans finished processing, failures included.
+    /// </summary>
+    public long ScanCount => Interlocked.Read(ref _scanCount);
 
     /// <summary>
     /// 中文：
@@ -355,6 +404,7 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     public void Dispose()
     {
         _coordinator.ReplayRequested -= OnReplayRequested;
+        _coordinator.ScanProcessed -= OnScanProcessed;
         _host.Dispose();
     }
 
@@ -650,7 +700,14 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
             // 步骤 5 / Step 5
             FlushReplays();
 
-            return action == HookAction.Swallow ? HookDecision.Swallow : HookDecision.PassThrough;
+            if (action == HookAction.Swallow)
+            {
+                Interlocked.Increment(ref _swallowedCount);
+                return HookDecision.Swallow;
+            }
+
+            Interlocked.Increment(ref _passedThroughCount);
+            return HookDecision.PassThrough;
         }
         catch (Exception hookException)
         {
@@ -677,6 +734,8 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
         {
             return;
         }
+
+        Interlocked.Increment(ref _rawInputCount);
 
         try
         {
@@ -716,6 +775,16 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
         => _replayBatch.Add(eventArgs.KeyEvent);
 
     /// <summary>
+    /// 中文：数一枪。只加计数，不做别的——这件事发生在钩子回调里
+    ///       （终止符是从钩子通道来的），任何多余的工作都在啃回调的时间预算。
+    /// English: Counts one scan and nothing else — this happens inside the hook callback (the
+    ///          terminator arrives on the hook channel) and any extra work eats the callback's
+    ///          time budget.
+    /// </summary>
+    private void OnScanProcessed(object? sender, ScanProcessedEventArgs eventArgs)
+        => Interlocked.Increment(ref _scanCount);
+
+    /// <summary>
     /// 中文：
     ///   把攒下的按键补发出去。
     ///
@@ -747,6 +816,7 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
         try
         {
             _replay.Replay(_replayBatch);
+            Interlocked.Add(ref _replayedCount, _replayBatch.Count);
         }
         catch (Exception replayException)
         {
