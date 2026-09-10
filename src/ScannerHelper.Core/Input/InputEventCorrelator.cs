@@ -364,6 +364,33 @@ public sealed class InputEventCorrelator : IInputEventCorrelator
     /// <inheritdoc />
     public IReadOnlyList<ResolvedKeyEvent> Advance() => SweepExpired(_clock.MonotonicNow);
 
+    /// <inheritdoc />
+    public IReadOnlyList<ResolvedKeyEvent> Flush()
+    {
+        List<ResolvedKeyEvent>? resolved = null;
+
+        foreach (var queue in _pendingHookEvents.Values)
+        {
+            while (queue.Count > 0)
+            {
+                var released = queue.Dequeue();
+                UnresolvedEventCount++;
+
+                resolved ??= [];
+                resolved.Add(new ResolvedKeyEvent(
+                    released, CorrelationDecision.Replay, DeviceId: null));
+            }
+        }
+
+        foreach (var queue in _pendingRawInputEvents.Values)
+        {
+            DiscardedRawInputCount += queue.Count;
+            queue.Clear();
+        }
+
+        return resolved ?? NoResolutions;
+    }
+
     /// <summary>
     /// 中文：清空全部待配对状态与计数。用于重新绑定扫码枪、或从 PAUSED 恢复
     ///       之后重新开始——那些时刻之前积压的事件都已经失去意义。

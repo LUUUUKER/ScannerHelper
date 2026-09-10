@@ -145,4 +145,40 @@ public interface IInputEventCorrelator
     ///   must never be swallowed indefinitely; the periodic advance is how that is honored.
     /// </summary>
     IReadOnlyList<ResolvedKeyEvent> Advance();
+
+    /// <summary>
+    /// 中文：
+    ///   立即结掉全部待配对事件，不等窗口到期。
+    ///   输入：无。输出：被结掉的钩子事件，一律判为 <see cref="CorrelationDecision.Replay"/>。
+    ///
+    ///   ★ 这个方法存在的唯一理由是**暂停不能吃掉按键**。
+    ///
+    ///     进入 PAUSED 的那一刻，很可能正有几个钩子事件被扣留着等 Raw Input。
+    ///     若直接清空状态走人，那几次按键就永久消失了——而 PAUSED 恰恰是
+    ///     "键盘失灵"时的救命稻草（规格 §5.7）。一个会吃掉按键的安全阀，
+    ///     在最需要它的那一刻反而加重了故障。
+    ///
+    ///     所以暂停时必须先把扣留中的事件全部放出去，再切换状态。
+    ///
+    ///   重新绑定扫码枪之后也应当调用：绑定变了，之前那些事件的来源判定
+    ///   已经失去依据，与其用旧绑定去判，不如一律放行。方向与决策 D-13 一致
+    ///   ——判不出来就重放，绝不吞掉。
+    /// English:
+    ///   Settles every pending event at once without waiting for the window, returning the
+    ///   withheld hook events, all as <see cref="CorrelationDecision.Replay"/>.
+    ///
+    ///   This exists for one reason: pausing must not eat keystrokes. At the moment PAUSED is
+    ///   entered there are likely several hook events withheld awaiting Raw Input, and simply
+    ///   clearing the state would lose those keystrokes permanently — while PAUSED is
+    ///   precisely the lifeline for "the keyboard stopped working" (spec §5.7). A safety valve
+    ///   that swallows keystrokes makes the failure worse at the one moment it is needed.
+    ///
+    ///   So pausing must release everything withheld before switching state.
+    ///
+    ///   It should also be called after rebinding the scanner: with the binding changed, the
+    ///   basis for judging those events' source is gone, and passing them through beats
+    ///   judging them against a stale binding. The direction matches decision D-13 — when in
+    ///   doubt, replay, never swallow.
+    /// </summary>
+    IReadOnlyList<ResolvedKeyEvent> Flush();
 }

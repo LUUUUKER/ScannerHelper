@@ -196,6 +196,21 @@ Assumption A4 raises the stakes: on a laptop there is no second keyboard to plug
 
 ## 8. Summary
 
-Roughly 50 cases across four components, all running on `net8.0` and all passing on a non-Windows machine.
+**49 cases across four components** — 5 domain types, 17 correlator, 14 session, 13 coordinator — all running on `net8.0` and all passing on a non-Windows machine. Together with Tasks 1–3 the suite stands at 186.
 
 Three do disproportionate work. **CR4** encodes the measured fact that the two channels disagree about virtual keys, without which every scan containing a capital letter is attributed to the wrong device. **CR17** encodes the expiry rule, without which one lost event quietly corrupts every correlation after it while the statistics still look healthy. **CO1** keeps `PAUSED` independent of everything it exists to escape from — and on a laptop, with no spare keyboard to plug in, that independence is the only escape route the operator has.
+
+### Guards verified by injecting the violation
+
+Every load-bearing guard was confirmed by deliberately breaking the thing it exists to catch, rather than being assumed to work because it was green.
+
+| Violation injected | Result |
+|---|---|
+| Remove the correlator's expiry sweep | **CR10, CR12 and CR17 fail together** — as predicted, three views of one property |
+| Remove the injected-event early return | **CR11 fails alone**, precisely |
+| Remove the session's reset after failure | **SS8 fails**, reporting `DGKJRDDGKJRDC5679F5NF` — half the previous scan joined to the current one, the exact shape Task 4a observed from the hardware |
+| Check the paused flag *after* consulting the correlator | **CO1 fails**, and the substitute reports spec §5.7's own sentence back |
+| Do not release withheld keystrokes when pausing | **CO2 fails**: "0 released" where two keystrokes were withheld |
+| Pair on the virtual key instead of the scan code | **Cannot be injected** — see CR4's caveat above |
+
+SS8's failure message is worth dwelling on. It produced `DGKJRDDGKJRDC5679F5NF`, and Task 4a recorded the hardware producing `DGKJRDC5679F5NDGKF5NF` with Scanner Helper not running at all. The two are the same shape. A software defect of this kind would therefore be indistinguishable on site from the hardware fault already known to occur — investigation would keep pointing at the scanner while the fault sat in `ScanSession.CheckTimeout`. That is why the reset lives in a single `CompleteWith` that every terminating path must pass through, rather than being repeated on four of them.
