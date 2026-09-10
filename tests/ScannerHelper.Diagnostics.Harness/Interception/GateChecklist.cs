@@ -258,6 +258,133 @@ public sealed class GateChecklist
 
     /// <summary>
     /// 中文：
+    ///   找出「人打的钩」与「运行时计数」互相矛盾的地方。
+    ///
+    ///   ★ 这个方法是一次真实事故的产物。
+    ///
+    ///     2026-09-10 的第一次实测导出了一份写着「硬性关卡通过」的报告，而同一份
+    ///     报告里的计数是：处理完成的扫描 0 枪、钩子回调最长 3379 毫秒、381 次
+    ///     超预算。一枪都没成功处理过，第 5、6、7 条（验的全是扫码枪内容怎么被
+    ///     处理）就不可能被验证过——但工具照单全收，把这个结论签发了出去。
+    ///
+    ///     一个会在自己的数据面前签发相反结论的关卡，等于没有关卡。所以判定不能
+    ///     只看人打的钩：人看到的是屏幕上的字符，而「吞掉到底生没生效」这种事，
+    ///     人在屏幕上根本看不出来——回调超时之后 Windows 会无视我们的返回值把
+    ///     按键照常投递，看起来和「我们主动放行」一模一样。
+    ///
+    ///   返回空列表表示没有矛盾。
+    /// English:
+    ///   Finds contradictions between the ticked boxes and the runtime counters.
+    ///
+    ///   This method comes from a real failure. The first run, on 2026-09-10, exported a report
+    ///   saying the hard gate had passed while the counters in that same report read: zero scans
+    ///   processed, a longest hook callback of 3379 ms, 381 callbacks over budget. With not one
+    ///   scan processed, items 5, 6 and 7 — all of which concern how scanner content is handled —
+    ///   cannot have been verified. The tool accepted it and issued the verdict anyway.
+    ///
+    ///   A gate that certifies a conclusion its own data contradicts is not a gate. So the verdict
+    ///   cannot rest on ticked boxes alone: a person sees characters on a screen, and whether the
+    ///   swallow actually took effect is not something a screen shows — after a timeout Windows
+    ///   disregards our return value and delivers the keystroke anyway, which looks exactly like
+    ///   passing it through on purpose.
+    ///
+    ///   An empty list means no contradiction.
+    /// </summary>
+    public IReadOnlyList<string> FindContradictions(PipelineSnapshot snapshot)
+    {
+        var contradictions = new List<string>();
+
+        // 1 —— 一枪都没处理完，却把「扫码枪内容怎么处理」那几条标成了通过。
+        // 1 — no scan was processed, yet items about handling scanner content are marked passed.
+        var scannerItems = Items
+            .Where(item => item.Number is 5 or 6 or 7 or 9 && item.Result == GateResult.Passed)
+            .Select(item => item.Number)
+            .ToArray();
+
+        if (snapshot.ScanCount == 0 && scannerItems.Length > 0)
+        {
+            contradictions.Add(string.Format(
+                CultureInfo.InvariantCulture,
+                "处理完成的扫描为 0，但第 {0} 条被标成通过。这几条验的都是扫码枪的内容如何被处理，"
+                + "一枪都没成功处理过就不可能验证它们。"
+                + " / Zero scans were processed, yet items {0} are marked passed. Those items all"
+                + " concern how scanner content is handled and cannot be verified without a single"
+                + " processed scan.",
+                string.Join("、", scannerItems)));
+        }
+
+        // 2 —— 回调超时意味着「吞掉」可能根本没生效，而这在屏幕上看不出来。
+        // 2 — a timed-out callback means the swallow may never have taken effect, and a screen
+        //     cannot show that.
+        if (snapshot.HookCallbackBudgetExceededCount > 0)
+        {
+            contradictions.Add(string.Format(
+                CultureInfo.InvariantCulture,
+                "有 {0} 次钩子回调超过 {1:0} 毫秒预算（最长 {2:0.000} 毫秒）。回调超时之后 Windows"
+                + " 会无视我们返回的「吞掉」、把按键照常投递出去，并可能把钩子摘掉（规格 §19.1）"
+                + "——此时第 5、6 条在屏幕上看到的一切都不能作数。"
+                + " / {0} hook callbacks exceeded the {1:0} ms budget (longest {2:0.000} ms). After"
+                + " a timeout Windows disregards our swallow and delivers the keystroke anyway,"
+                + " possibly removing the hook (spec §19.1) — nothing observed on screen for items"
+                + " 5 and 6 can be trusted in that state.",
+                snapshot.HookCallbackBudgetExceededCount,
+                Win32.Win32ScannerInputSource.HookCallbackBudget.TotalMilliseconds,
+                snapshot.MaximumHookCallbackDuration.TotalMilliseconds));
+        }
+
+        // 3 —— 什么都没被拦下来过。
+        // 3 — nothing was ever intercepted.
+        if (snapshot.SwallowedCount == 0 && HasPassedHardGate)
+        {
+            contradictions.Add(
+                "吞掉的按键数为 0：整个过程里没有任何一次拦截发生，第 3~6 条无从谈起。"
+                + " / Zero keystrokes were swallowed: no interception happened at all, leaving"
+                + " items 3-6 without a subject.");
+        }
+
+        // 4 —— 吞掉与补发完全相等，说明没有任何一个按键被判定为来自扫码枪。
+        //      扫码枪的按键会被吞掉而**不**补发（内容进扫描会话），所以两个数
+        //      相等就意味着扫码枪从头到尾没被认出来过。
+        // 4 — swallowed exactly equals replayed, so not one keystroke was attributed to the
+        //     scanner: a scanner's keystrokes are swallowed and not replayed, their content going
+        //     into the scan session instead.
+        if (snapshot.SwallowedCount > 0 && snapshot.SwallowedCount == snapshot.ReplayedCount)
+        {
+            contradictions.Add(string.Format(
+                CultureInfo.InvariantCulture,
+                "吞掉 {0} 等于补发 {0}：没有任何一个按键被判定为来自扫码枪（扫码枪的按键会被吞掉"
+                + "而不补发）。要么绑定没生效，要么整个过程里扫码枪根本没被用到。"
+                + " / Swallowed {0} equals replayed {0}: not one keystroke was attributed to the"
+                + " scanner, whose keystrokes are swallowed without being replayed. Either the"
+                + " binding did not take effect, or the scanner was never used.",
+                snapshot.SwallowedCount));
+        }
+
+        // 5 —— 流水线抛过异常。
+        // 5 — the pipeline threw.
+        if (snapshot.FaultCount > 0)
+        {
+            contradictions.Add(string.Format(
+                CultureInfo.InvariantCulture,
+                "流水线抛出过 {0} 次异常（最近：{1}）。"
+                + " / The pipeline threw {0} times (most recent: {1}).",
+                snapshot.FaultCount,
+                snapshot.LastFault));
+        }
+
+        return contradictions;
+    }
+
+    /// <summary>
+    /// 中文：关卡是否真的通过：人打的钩全过，**并且**运行时计数不与之矛盾。
+    /// English: Whether the gate genuinely passed: every box ticked, and the runtime counters not
+    ///          contradicting them.
+    /// </summary>
+    public bool HasPassedGate(PipelineSnapshot snapshot)
+        => HasPassedHardGate && FindContradictions(snapshot).Count == 0;
+
+    /// <summary>
+    /// 中文：
     ///   导出一份 Markdown 报告。
     ///   输入：machineDescription 这次是在哪台机器、什么条件下测的。
     ///
@@ -278,9 +405,11 @@ public sealed class GateChecklist
         report.AppendLine(CultureInfo.InvariantCulture, $"机器与条件 / Machine and conditions: {machineDescription}");
         report.AppendLine();
 
+        var contradictions = FindContradictions(snapshot);
+
         report.AppendLine("## 结论 / Verdict");
         report.AppendLine();
-        report.AppendLine(HasPassedHardGate
+        report.AppendLine(HasPassedHardGate && contradictions.Count == 0
             ? "**硬性关卡通过。** 第 2~6 条全部明确通过，可以继续构建完整应用。"
               + "  \n**Hard gate passed.** Items 2–6 are all explicitly passed; building the full application may continue."
             : "**硬性关卡未通过。** 第 2~6 条中存在未测或失败的条目。"
@@ -291,6 +420,25 @@ public sealed class GateChecklist
               + " heuristics; document the observed event ordering and failure modes, and revisit the"
               + " architecture.");
         report.AppendLine();
+
+        if (contradictions.Count > 0)
+        {
+            report.AppendLine("### 打钩与运行时计数矛盾 / Ticked boxes contradict the counters");
+            report.AppendLine();
+            report.AppendLine(
+                "以下每一条都说明同一件事：这次测量看到的东西，不足以支撑上面那些「通过」。"
+                + "  \n"
+                + "Each of these says the same thing: what this run observed does not support the"
+                + " passes ticked above.");
+            report.AppendLine();
+
+            foreach (var contradiction in contradictions)
+            {
+                report.AppendLine(CultureInfo.InvariantCulture, $"- {contradiction}");
+            }
+
+            report.AppendLine();
+        }
 
         report.AppendLine("## 逐条结果 / Item by item");
         report.AppendLine();

@@ -41,22 +41,33 @@
 //     （这一条目前由本层把关。更彻底的做法是让关联器在未绑定时直接返回
 //     PassThrough，那属于 Core 的判断，需要单独立一条决策并补测试。）
 //
-//   ★ 一个已知的、可测量的风险：解析在钩子回调里跑。
+//   ★ 钩子回调里一个字节都不往外发 —— 这条纪律是一次实测事故换来的。
 //
-//     扫描的终止符是从钩子通道来的，于是"一枪收完"这件事发生在钩子回调内部，
-//     而协调器紧接着就地做解析、校验、输出（见 ScanInputCoordinator 的
-//     ProcessScanResult）。CLAUDE.md 明写钩子回调里不得跑正则。
+//     2026-09-10 的第一次 4b 实测：回调最长 3379 毫秒，381 次超过 50 毫秒
+//     预算，处理完成的扫描 0 枪。现场表现是焦点在本程序输入框里一切正常，
+//     焦点在别的程序里则打字和扫码都冒出一长串重复字符。
 //
-//     实际耗时通常在微秒量级：条码只有二三十个字符，正则还带着 100 毫秒的
-//     有限超时。但工人自配的正则一旦发生灾难性回溯，两次匹配就能吃掉 200
-//     毫秒，逼近 LowLevelHooksTimeout 的 300 毫秒——而顶穿之后 Windows 会
-//     悄悄摘掉钩子，进程照跑、界面照显示模式，原始条码直接流进业务软件
-//     （规格 §19.1）。
+//     成因是当时在回调里直接调用了 SendInput 去补发。回调是同步的、Windows
+//     正等着答复，而把合成按键送进另一个进程（还可能经过它的输入法）会阻塞。
+//     超时之后 **Windows 不再理会我们返回的「吞掉」，把按键照常投递出去**，
+//     稍后我们又补发一次 —— 同一下按键送达两次。连带后果更重：回调卡住时
+//     消息循环也停了，WM_INPUT 排不上队，50 毫秒的关联窗口必然超时，于是
+//     每个按键都被判成「来源不明」，扫码枪从头到尾没被认出来过。
 //
-//     本类不隐瞒这一点，而是把它变成可观测的：每一次回调都计时，
-//     HookCallbackBudgetExceededCount 与 MaximumHookCallbackDuration 让它
-//     从"不可见的风险"变成"看得见的数字"。真正的修法（把处理挪出回调）
-//     要改 Core 的状态机时序，应当先立决策、再动。
+//     现在全部输出经 DeferredKeyboardOutput 排队，由消息循环发送；回调只
+//     排队并投递一条消息。详见那个文件的文件头。
+//
+//   ★ 仍然留在回调里的一件事：解析与校验（决策 D-25 未决）。
+//
+//     扫描的终止符是从钩子通道来的，于是"一枪收完"发生在回调内部，协调器
+//     紧接着就地解析、校验（见 ScanInputCoordinator 的 ProcessScanResult）。
+//     输出已经挪走了，但正则还在。CLAUDE.md 明写回调里不得跑正则。
+//
+//     通常是微秒量级（条码二三十个字符），但工人自配的正则一旦灾难性回溯，
+//     两次匹配就能吃掉 200 毫秒，逼近 LowLevelHooksTimeout 的 300 毫秒。
+//     把它挪出回调要改 Core 的状态机时序，牵动已通过的用例，应当先立决策。
+//     在那之前，它由 HookCallbackBudgetExceededCount 与
+//     MaximumHookCallbackDuration 盯着 —— 上面那次事故正是这两个数字抓到的。
 //
 // English:
 //   Task 4b's interception pipeline: the hook, Raw Input, the decoder and replay, composed
@@ -92,20 +103,29 @@
 //   PassThrough directly while unbound, which is Core's judgment to make and needs a decision
 //   of its own plus tests.)
 //
-//   A known, measurable risk: parsing runs inside the hook callback. The scan's terminator
-//   arrives on the hook channel, so "the scan completed" happens inside the callback and the
-//   coordinator parses, validates and emits right there (see ScanInputCoordinator's
-//   ProcessScanResult), while CLAUDE.md forbids regex in the hook callback. Real cost is
-//   usually microseconds — barcodes are twenty or thirty characters and the regex carries a
-//   finite 100 ms timeout — but one operator-configured regex with catastrophic backtracking
-//   can spend 200 ms across two matches, approaching LowLevelHooksTimeout's 300 ms. Blow that
-//   budget and Windows silently removes the hook: the process keeps running, the UI keeps
-//   showing a mode, and raw barcodes flow straight into the business application (spec §19.1).
+//   The hook callback sends not one byte outward, a discipline that cost a measured failure.
+//   The first 4b run, on 2026-09-10, recorded a longest callback of 3379 ms, 381 callbacks over
+//   the 50 ms budget, and zero scans processed: with focus in this program's own text box
+//   everything looked fine, while with focus elsewhere both typing and scanning produced long
+//   runs of repeated characters. The cause was calling SendInput for replay inside the callback.
+//   The callback is synchronous with Windows waiting on it, and pushing synthesized keys into
+//   another process — possibly through its IME — blocks. On timeout Windows disregards our
+//   "swallow" and delivers the key anyway, and a moment later we replay it: the same keypress
+//   twice. Worse, a stuck callback stops the message loop, WM_INPUT cannot be processed, the
+//   50 ms correlation window necessarily expires, every keystroke is settled as "source
+//   unknown", and the scanner is never identified at all. All output now queues through
+//   DeferredKeyboardOutput and is sent by the message loop; the callback only enqueues and posts.
 //
-//   This class does not paper over it but makes it observable: every callback is timed, and
-//   HookCallbackBudgetExceededCount together with MaximumHookCallbackDuration turn an
-//   invisible risk into a visible number. The real fix — moving processing out of the callback
-//   — changes Core's state-machine timing and deserves a recorded decision first.
+//   One thing still runs in the callback: parsing and validation (decision D-25, open). The
+//   terminator arrives on the hook channel, so a scan completing happens inside the callback and
+//   the coordinator parses and validates right there (ScanInputCoordinator's ProcessScanResult).
+//   Output has moved out; the regex has not, and CLAUDE.md forbids regex in the hook callback.
+//   Usually microseconds for a twenty-character barcode, but one operator-configured regex with
+//   catastrophic backtracking can spend 200 ms across two matches, approaching
+//   LowLevelHooksTimeout's 300 ms. Moving it out changes Core's state-machine timing and touches
+//   passing tests, so it deserves a recorded decision first. Until then it is watched by
+//   HookCallbackBudgetExceededCount and MaximumHookCallbackDuration — the two numbers that
+//   caught the failure above.
 //
 // 包含的成员 / Members in this file:
 //   IsRunning / IsPaused / BoundDeviceHandle  当前状态
@@ -166,34 +186,28 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
 
     private readonly ScanInputCoordinator _coordinator;
     private readonly IInputEventCorrelator _correlator;
+    private readonly DeferredKeyboardOutput _output;
     private readonly KeyboardCharacterDecoder _decoder = new();
-    private readonly KeystrokeReplayService _replay = new();
     private readonly RawInputDeviceResolver _resolver = new();
     private readonly MessageOnlyCaptureHost _host;
 
     /// <summary>
     /// 中文：
-    ///   一次调用里攒下来的待补发按键，攒完一起发。
+    ///   排空输出队列这个动作，预先缓存成一个委托。
     ///
-    ///   ★ 合并成一次 SendInput 不只是省开销。SendInput 保证**一次调用里的
-    ///     事件不会被别的输入插进来**；拆成多次，两次调用之间就可能挤进真实
-    ///     按键，补发出去的顺序于是和工人按下的顺序不一样了。
-    ///
-    ///   复用同一个 List 而不是每次新建：补发发生在钩子回调路径上，而对象
-    ///   分配带来的 GC 暂停正是可能顶穿 LowLevelHooksTimeout 的原因之一。
+    ///   ★ 钩子回调里要把它投递给消息循环，而 <c>_output.Drain</c> 这样的
+    ///     方法组每写一次就分配一个委托对象。回调路径上的对象分配会带来
+    ///     GC 暂停，而 GC 暂停正是能顶穿 LowLevelHooksTimeout 的东西
+    ///     （规格 §19.1）。存成字段，那里就一次分配都没有。
     /// English:
-    ///   Keystrokes to replay, accumulated within one call and sent together.
+    ///   The drain action, cached as a delegate.
     ///
-    ///   Batching into a single SendInput is not only about overhead: SendInput guarantees that
-    ///   nothing else is interleaved into one call's events. Split across several calls, real
-    ///   keystrokes can arrive between them and what is replayed no longer matches the order
-    ///   the operator typed.
-    ///
-    ///   The list is reused rather than reallocated: replay happens on the hook callback path,
-    ///   and the GC pause an allocation can trigger is among the things able to blow the
-    ///   LowLevelHooksTimeout budget.
+    ///   The hook callback posts it to the message loop, and writing <c>_output.Drain</c> as a
+    ///   method group allocates a delegate each time. An allocation on the callback path can
+    ///   trigger the GC pause that blows the LowLevelHooksTimeout budget (spec §19.1); held in a
+    ///   field, that path allocates nothing.
     /// </summary>
-    private readonly List<KeyEvent> _replayBatch = [];
+    private readonly Action _drainOutput;
 
     private LowLevelKeyboardHook? _hook;
     private RawInputKeyboardListener? _rawInput;
@@ -201,7 +215,6 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     private long _boundDeviceHandle;
     private long _swallowedCount;
     private long _passedThroughCount;
-    private long _replayedCount;
     private long _rawInputCount;
     private long _scanCount;
     private long _maximumHookCallbackTicks;
@@ -231,13 +244,19 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     /// <exception cref="ArgumentNullException">
     /// 中文：任一参数为 null。 English: Either argument is null.
     /// </exception>
-    public Win32ScannerInputSource(ScanInputCoordinator coordinator, IInputEventCorrelator correlator)
+    public Win32ScannerInputSource(
+        ScanInputCoordinator coordinator,
+        IInputEventCorrelator correlator,
+        DeferredKeyboardOutput output)
     {
         ArgumentNullException.ThrowIfNull(coordinator);
         ArgumentNullException.ThrowIfNull(correlator);
+        ArgumentNullException.ThrowIfNull(output);
 
         _coordinator = coordinator;
         _correlator = correlator;
+        _output = output;
+        _drainOutput = output.Drain;
         _coordinator.ReplayRequested += OnReplayRequested;
         _coordinator.ScanProcessed += OnScanProcessed;
 
@@ -316,7 +335,7 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     /// 中文：补发出去的按键数。
     /// English: How many keystrokes were replayed.
     /// </summary>
-    public long ReplayedCount => Interlocked.Read(ref _replayedCount);
+    public long ReplayedCount => _output.ReplayedCount;
 
     /// <summary>
     /// 中文：收到的 Raw Input 事件数。它与钩子事件数差得太多，说明两条通道
@@ -358,13 +377,13 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     /// 中文：流水线抛出异常的次数。
     /// English: How many times the pipeline threw.
     /// </summary>
-    public long FaultCount => Interlocked.Read(ref _faultCount);
+    public long FaultCount => Interlocked.Read(ref _faultCount) + _output.FaultCount;
 
     /// <summary>
     /// 中文：最近一次异常，null 表示没有出过错。
     /// English: The most recent exception, or null if there has been none.
     /// </summary>
-    public Exception? LastFault => Volatile.Read(ref _lastFault);
+    public Exception? LastFault => Volatile.Read(ref _lastFault) ?? _output.LastFault;
 
     /// <summary>
     /// 中文：
@@ -493,7 +512,7 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
         => _host.Post(() =>
         {
             _coordinator.Pause();
-            FlushReplays();
+            _output.Drain();
         });
 
     /// <summary>
@@ -584,7 +603,7 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
         try
         {
             _coordinator.Tick();
-            FlushReplays();
+            _output.Drain();
         }
         catch (Exception tickException)
         {
@@ -698,7 +717,22 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
             var action = _coordinator.OnHookEvent(keyEvent);
 
             // 步骤 5 / Step 5
-            FlushReplays();
+            //
+            // ★ 这里**只投递，不发送**。整个类最重要的一条纪律，代价是一次
+            //   实测事故换来的：把 SendInput 放在这里，回调最长跑到 3379 毫秒，
+            //   Windows 超时之后不再理会我们返回的「吞掉」、把按键照常投递出去，
+            //   而我们随后又补发一次——同一下按键送达两次。详见
+            //   DeferredKeyboardOutput 的文件头。
+            //
+            // Post, never send. This is the class's most important discipline and it cost a
+            // measured failure: with SendInput here the callback reached 3379 ms, Windows timed
+            // out, disregarded our "swallow" and delivered the keystroke anyway, and we replayed
+            // it a moment later — the same keypress landing twice. See DeferredKeyboardOutput's
+            // header.
+            if (_output.HasPending)
+            {
+                _host.Post(_drainOutput);
+            }
 
             if (action == HookAction.Swallow)
             {
@@ -746,7 +780,15 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
                 IsKeyUp: observedEvent.IsKeyUp,
                 DeviceId: observedEvent.DeviceHandle));
 
-            FlushReplays();
+            // 这里跑在消息循环上，不是钩子回调里，可以直接发。
+            // 而且这是 99.4% 的路径（Task 4a 实测钩子恒先于 WM_INPUT 到达），
+            // 所以被扣留的按键绝大多数在这里就立刻放出去了，补发延迟极小。
+            //
+            // This runs on the message loop rather than in the hook callback, so it can send
+            // directly — and it is the 99.4% path (Task 4a measured the hook always preceding
+            // WM_INPUT), so withheld keystrokes are almost always released right here, with
+            // minimal replay latency.
+            _output.Drain();
         }
         catch (Exception rawInputException)
         {
@@ -756,23 +798,20 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
 
     /// <summary>
     /// 中文：
-    ///   收到补发请求，先攒起来。
+    ///   收到补发请求，排进输出队列。
     ///
-    ///   ★ 不在这里立刻发。一次协调器调用可能连着放出好几个按键（例如从
-    ///     PAUSED 进入时的 Flush），逐个发就是逐次 SendInput，而两次调用
-    ///     之间可能挤进真实按键，补发出去的顺序于是和工人按下的顺序不一样。
-    ///     攒成一批、一次发完，Windows 保证这一批中间不会被插进别的输入。
+    ///   ★ 绝不在这里发送：本方法可能是在钩子回调里被调用的。发送与排队的
+    ///     分工、以及为什么补发要和文本输出共用一个队列，见
+    ///     <see cref="DeferredKeyboardOutput"/>。
     /// English:
-    ///   A replay was requested; accumulate it.
+    ///   A replay was requested; queue it.
     ///
-    ///   Nothing is sent here. One coordinator call can release several keystrokes at once —
-    ///   entering PAUSED flushes them all — and sending each on its own means one SendInput per
-    ///   key, with real keystrokes able to arrive between calls so that what is replayed no
-    ///   longer matches the order the operator typed. Batched into one call, Windows guarantees
-    ///   nothing is interleaved.
+    ///   Never sent here: this may be called from inside the hook callback. See
+    ///   <see cref="DeferredKeyboardOutput"/> for the split between queuing and sending, and for
+    ///   why replay shares one queue with text output.
     /// </summary>
     private void OnReplayRequested(object? sender, ReplayRequestedEventArgs eventArgs)
-        => _replayBatch.Add(eventArgs.KeyEvent);
+        => _output.EnqueueReplay(eventArgs.KeyEvent);
 
     /// <summary>
     /// 中文：数一枪。只加计数，不做别的——这件事发生在钩子回调里
@@ -783,50 +822,6 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     /// </summary>
     private void OnScanProcessed(object? sender, ScanProcessedEventArgs eventArgs)
         => Interlocked.Increment(ref _scanCount);
-
-    /// <summary>
-    /// 中文：
-    ///   把攒下的按键补发出去。
-    ///
-    ///   ★ 失败必须记下来，绝不能静静吞掉：补发失败意味着工人的按键真的丢了。
-    ///     最常见的原因是 UIPI——业务软件以更高的完整性级别运行，我们的合成
-    ///     输入进不去（规格 §2.1 假设 A2 要求两者同级）。
-    ///
-    ///   无论成败都清空批次。不清的话，失败之后这一批会在下一次补发时又发
-    ///   一遍——工人得到的是重复的字符，比丢一个更难查。
-    /// English:
-    ///   Sends the accumulated keystrokes.
-    ///
-    ///   Failure must be recorded and never swallowed: a failed replay means the operator's
-    ///   keystrokes really were lost. The usual cause is UIPI — the business application runs at
-    ///   a higher integrity level and our synthesized input cannot reach it (spec §2.1's
-    ///   assumption A2 requires them to match).
-    ///
-    ///   The batch is cleared either way. Left in place after a failure it would be sent again
-    ///   with the next flush, giving the operator duplicated characters — harder to diagnose
-    ///   than a missing one.
-    /// </summary>
-    private void FlushReplays()
-    {
-        if (_replayBatch.Count == 0)
-        {
-            return;
-        }
-
-        try
-        {
-            _replay.Replay(_replayBatch);
-            Interlocked.Add(ref _replayedCount, _replayBatch.Count);
-        }
-        catch (Exception replayException)
-        {
-            RecordFault(replayException);
-        }
-        finally
-        {
-            _replayBatch.Clear();
-        }
-    }
 
     /// <summary>
     /// 中文：
@@ -849,10 +844,13 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
 
             for (var index = 0; index < released.Count; index++)
             {
-                _replayBatch.Add(released[index].Event);
+                _output.EnqueueReplay(released[index].Event);
             }
 
-            FlushReplays();
+            // 本方法只从消息循环上被调用（收尾、绑定、解绑），可以直接发。
+            // This is only ever called from the message loop — teardown, bind, unbind — so it
+            // can send directly.
+            _output.Drain();
         }
         catch (Exception releaseException)
         {

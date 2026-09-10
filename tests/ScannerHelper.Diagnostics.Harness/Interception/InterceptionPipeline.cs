@@ -114,6 +114,27 @@ public sealed class InterceptionPipeline : IDisposable
     private readonly ScanInputCoordinator _coordinator;
     private readonly ModeManager _modeManager;
     private readonly Win32ScannerInputSource _source;
+
+    /// <summary>
+    /// 中文：
+    ///   全部合成输出的出口。
+    ///
+    ///   ★ 它同时被两边持有：作为 IKeyboardOutputService 交给协调器（协调器
+    ///     用它发扫描结果），也交给输入来源（输入来源用它排队补发、并在
+    ///     消息循环上把队列排空）。共用一个实例不是省事，而是**必需**——
+    ///     补发与文本输出的先后关系有意义，分成两个队列就等于把工人看到的
+    ///     字符顺序交给两次独立的排空。详见 DeferredKeyboardOutput。
+    /// English:
+    ///   The single exit for all synthesized output.
+    ///
+    ///   Held by both sides: handed to the coordinator as its IKeyboardOutputService, and to the
+    ///   input source, which queues replays into it and drains it on the message loop. Sharing
+    ///   one instance is required rather than convenient — the ordering between replay and text
+    ///   output carries meaning, and two queues would hand the order the operator sees to two
+    ///   independent drains. See DeferredKeyboardOutput.
+    /// </summary>
+    private readonly DeferredKeyboardOutput _output = new();
+
     private readonly ConcurrentQueue<ScanLogEntry> _scanLog = new();
 
     private bool _isDisposed;
@@ -145,7 +166,7 @@ public sealed class InterceptionPipeline : IDisposable
             _modeManager,
             SkuParserFactory.Create(effectiveSettings.SkuParsing),
             SkuValidatorFactory.Create(effectiveSettings.SkuValidation),
-            new SendInputKeyboardOutputService(),
+            _output,
 
             // 暂停/恢复刻意不绑热键（规格 §13.3）：安全阀存在的意义是救
             // "键盘失灵"，而给它配一个默认热键等于暗示"出事了按这个键"——
@@ -158,7 +179,7 @@ public sealed class InterceptionPipeline : IDisposable
                 ToggleMode: VkF8, ForceSend: VkF10, Cancel: VkEscape, PauseResume: null)));
 
         _coordinator.ScanProcessed += OnScanProcessed;
-        _source = new Win32ScannerInputSource(_coordinator, _correlator);
+        _source = new Win32ScannerInputSource(_coordinator, _correlator, _output);
     }
 
     /// <summary>

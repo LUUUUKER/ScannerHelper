@@ -337,7 +337,7 @@ public partial class InterceptionWindow : Window
         UpdateButtons(snapshot);
 
         // 步骤 4 / Step 4
-        UpdateGateVerdict();
+        UpdateGateVerdict(snapshot);
     }
 
     /// <summary>
@@ -464,17 +464,45 @@ public partial class InterceptionWindow : Window
     }
 
     /// <summary>
-    /// 中文：刷新关卡结论。红字是常态——只有第 2~6 条全部明确通过才转绿。
-    /// English: Refreshes the gate verdict. Red is the normal state; it turns green only when
-    ///          every one of items 2–6 is explicitly passed.
+    /// <para>
+    /// 中文：
+    ///   刷新关卡结论。红字是常态——第 2~6 条全部明确通过，**并且**运行时计数
+    ///   不与之矛盾，才转绿。
+    ///
+    ///   ★ 只看人打的钩是不够的，这是实测教训：第一次导出的报告写着「关卡通过」，
+    ///     而同一份报告里处理完成的扫描是 0 枪、回调最长 3379 毫秒。人看到的是
+    ///     屏幕上的字符，而「吞掉到底生没生效」屏幕上根本看不出来——回调超时后
+    ///     Windows 会无视我们的返回值照常投递，看起来和主动放行一模一样。
+    ///     矛盾的详情放在提示气泡里，鼠标停上去就能看到。
+    /// English:
+    ///   Refreshes the gate verdict. Red is the normal state; it turns green only when every one
+    ///   of items 2–6 is explicitly passed and the runtime counters do not contradict them.
+    ///
+    ///   Ticked boxes alone are not enough, which is a measured lesson: the first exported report
+    ///   said the gate had passed while that same report showed zero scans processed and a
+    ///   longest callback of 3379 ms. A person sees characters on a screen, and whether the
+    ///   swallow took effect is not something a screen shows — after a timeout Windows disregards
+    ///   our return value and delivers the key anyway, looking exactly like a deliberate pass.
+    ///   The details sit in the tooltip.
+    /// </para>
     /// </summary>
-    private void UpdateGateVerdict()
+    private void UpdateGateVerdict(PipelineSnapshot snapshot)
     {
-        var passed = _checklist.HasPassedHardGate;
+        var contradictions = _checklist.FindContradictions(snapshot);
+        var passed = _checklist.HasPassedHardGate && contradictions.Count == 0;
 
         GateVerdictText.Text = passed
             ? "硬性关卡：通过 / Hard gate: passed"
-            : "硬性关卡：未通过 / Hard gate: not passed";
+            : contradictions.Count > 0 && _checklist.HasPassedHardGate
+                ? string.Format(
+                    CultureInfo.InvariantCulture,
+                    "硬性关卡：打钩与计数矛盾（{0} 条）/ contradicted by counters",
+                    contradictions.Count)
+                : "硬性关卡：未通过 / Hard gate: not passed";
+
+        GateVerdictText.ToolTip = contradictions.Count == 0
+            ? null
+            : string.Join(Environment.NewLine + Environment.NewLine, contradictions);
 
         GateVerdictText.Foreground = passed
             ? new SolidColorBrush(Color.FromRgb(0x1B, 0x5E, 0x20))
