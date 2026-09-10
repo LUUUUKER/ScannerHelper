@@ -13,17 +13,37 @@ existing warehouse application needs no modification.
 
 ## 文档 / Documentation
 
-这三份文件是事实来源。改动行为之前先读它们，不要在实现里另行解释业务规则。
+规格与实施计划是事实来源。改动行为之前先读它们，不要在实现里另行解释业务规则。
 
-These three files are the source of truth. Read them before changing behavior; do not
-reinterpret business rules in the implementation.
+The spec and the implementation plan are the source of truth. Read them before changing
+behavior; do not reinterpret business rules in the implementation.
 
 | 文件 | 内容 |
 |---|---|
 | [`docs/SCANNER_HELPER_SPEC.md`](docs/SCANNER_HELPER_SPEC.md) | 产品与技术规格，含验收标准 |
 | [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) | 分任务实施计划与推荐顺序 |
-| [`docs/TEST_PLAN_PHASE_A.md`](docs/TEST_PLAN_PHASE_A.md) | Task 1–3 的用例清单与九条已定设计决策 |
 | [`docs/design/palette.html`](docs/design/palette.html) | 状态配色参考，含色觉障碍与低质量显示器模拟 |
+
+测试计划按任务分册。每一册都记录了**已定的设计决策**及其理由，以及每条守卫是
+如何通过"故意制造违规"验证过的——决策的编号（D-1…D-24）跨册连续。
+
+The test plans are split by task. Each records the design decisions it settled and why,
+and how every load-bearing guard was verified by deliberately injecting the violation it
+exists to catch. Decision numbers (D-1…D-24) run continuously across all three.
+
+| 文件 | 内容 |
+|---|---|
+| [`docs/TEST_PLAN_PHASE_A.md`](docs/TEST_PLAN_PHASE_A.md) | Task 1–3：解析、校验、配置持久化。D-1…D-10 |
+| [`docs/TEST_PLAN_TASK_6.md`](docs/TEST_PLAN_TASK_6.md) | Task 6：扫描会话、通道关联、输入协调器。D-11…D-18 |
+| [`docs/TEST_PLAN_PHASE_A_REMAINDER.md`](docs/TEST_PLAN_PHASE_A_REMAINDER.md) | Task 7a、8a、5a：输出、热键、设备匹配。D-19…D-24 |
+
+Task 4a 的测量报告也在 `docs/` 下，文件名形如 `TASK_4A_MEASUREMENTS_*.md`。
+它是后续每一个架构论断的证据基础（规格 §4.3），其中第 5 节记录了一个到现在
+仍未解决的问题——见下方「当前进度」。
+
+Task 4a's measurement reports live under `docs/` as `TASK_4A_MEASUREMENTS_*.md`. They are
+the evidence base for every later architectural argument (spec §4.3), and their section 5
+records a question that is still open — see Status below.
 
 ---
 
@@ -32,11 +52,11 @@ reinterpret business rules in the implementation.
 ```text
 src/
   ScannerHelper.Core/     net8.0          纯逻辑，零 Windows 依赖，可在 macOS 上构建与测试
-  ScannerHelper.Win32/    net8.0-windows  全部原生互操作（Phase B，尚未创建）
+  ScannerHelper.Win32/    net8.0-windows  全部原生互操作
   ScannerHelper.App/      net8.0-windows  WPF 界面（Phase B，尚未创建）
 tests/
   ScannerHelper.Core.Tests/            net8.0          单元测试
-  ScannerHelper.Diagnostics.Harness/   net8.0-windows  人工诊断工具（Phase B，尚未创建）
+  ScannerHelper.Diagnostics.Harness/   net8.0-windows  人工诊断工具（Task 4a 观测工具）
 ```
 
 依赖方向一律向内：`Core` 定义接口，`Win32` 实现接口，`App` 负责组装。
@@ -94,11 +114,12 @@ has acquired a Windows dependency.
 | Phase A | 1 解决方案边界 | ✅ |
 | Phase A | 2 领域类型、模式、解析、校验 | ✅ |
 | Phase A | 3 配置模型与 JSON 持久化 | ✅ |
-| Phase A | 6 ScanSession / ScanInputCoordinator / InputEventCorrelator | ⬜ |
-| Phase A | 7a 输出接口与强制发送流程 | ⬜ |
-| Phase A | 8a 热键路由规则 | ⬜ |
-| Phase A | 5a DeviceIdentityMatcher | ⬜ |
-| Phase B | 4a 输入观测 spike（需真实硬件） | ⬜ |
+| Phase A | 6 ScanSession / ScanInputCoordinator / InputEventCorrelator | ✅ |
+| Phase A | 7a 输出接口与强制发送流程 | ✅ |
+| Phase A | 8a 热键路由规则 | ✅ |
+| Phase A | 5a DeviceIdentityMatcher | ✅ |
+| | **Phase A 完成 —— 230 个用例，零警告** | ✅ |
+| Phase B | 4a 输入观测 spike | ✅ 测量完成，**尚未在现场机复现** |
 | Phase B | 4b 输入拦截 spike — **硬性关卡** | ⬜ |
 | Phase B | 5b、7b、8b、9–13 | ⬜ |
 
@@ -108,3 +129,25 @@ Task 4b 是硬性关卡。若 Raw Input 与低层键盘钩子的关联被证明�
 Task 4b is a hard gate. If Raw Input/hook correlation proves unreliable, stop and
 report the evidence rather than hiding the symptoms behind timing heuristics
 (spec §4.3).
+
+### 两个仍然开着的问题 / Two questions still open
+
+这两条都属于 Phase B，且都必须在试点之前有答案。
+
+1. **4a 的数字尚未在现场机器上复现。** 事件时序是机器的性质，不是代码的性质，
+   而开发机不是试点机。
+
+2. **钩子看到的码是否完整。** Task 4a 实测发现，**本程序完全没有运行**时，
+   这把扫码枪就已经在往 Windows 的路上丢字符了（规格 §22.5）。Phase A 的
+   任何测试都答不了这个问题——这里全部的逻辑都假定关联器拿到的是真实发生过
+   的事件。硬件若不给，正确的逻辑只会产出一个自信的错误结果，而那正是
+   规格 §19.1 最在意的失效形态。
+
+Both belong to Phase B and both need an answer before the pilot. First, 4a's figures have
+not been reproduced on pilot hardware: event timing is a property of the machine, not of
+the code. Second, whether the hook receives a complete code — Task 4a found this scanner
+already losing characters on its way to Windows with Scanner Helper not running at all
+(spec §22.5), and no Phase A test can settle it. Everything here assumes the correlator is
+handed the events that actually occurred; if the hardware does not deliver them, correct
+logic produces a confidently wrong result, which is the failure mode spec §19.1 cares about
+most.

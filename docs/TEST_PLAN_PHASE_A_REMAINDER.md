@@ -5,7 +5,7 @@
 > **Source of truth:** `SCANNER_HELPER_SPEC.md`. Where this plan and the spec disagree, the spec wins and this file is wrong.
 > **Preceded by:** `TEST_PLAN_PHASE_A.md` (Tasks 1–3) and `TEST_PLAN_TASK_6.md`, whose decisions D-1…D-18 continue to apply.
 
-This file is written task by task as each is implemented, rather than in full up front. Sections for 8a and 5a are marked as pending and will be filled in the same form.
+This file was written task by task as each was implemented, rather than in full up front. All three sections are now complete, and with them Phase A.
 
 ---
 
@@ -125,4 +125,73 @@ Every row of spec §7's table, plus the cases the table does not state.
 
 ## 3. Task 5a — device identity matching
 
-_Pending. Will cover `DeviceIdentityMatcher` against synthetic identities: exact device-path match, serial match, VID/PID-only flagged as low confidence, no match, and an ambiguous match between two identical models. Task 4a's measurements make one case mandatory that the original plan did not anticipate — the laptop's built-in keyboard arrives over ACPI with **no VID/PID at all** (spec assumption A4), so matching must not assume those fields exist._
+### 3.1 The case the original plan could not have contained
+
+`TEST_PLAN_PHASE_A.md` and the implementation plan both list the matching cases as: exact device-path match, serial match, VID/PID-only flagged as low confidence, no match, and an ambiguous match between two identical models. Every one of those assumes each device *has* a VID and a PID, that being ordinary for USB devices.
+
+Task 4a's measurements broke the assumption. The devices actually present on the pilot-class machine were:
+
+```text
+HID Keyboard Device       VID_0581 PID_0115   \\?\HID#VID_0581&PID_0115&MI_00#...
+Standard PS/2 Keyboard    —        —          \\?\ACPI#MSFT0001#4&b6e66aa&0#...
+```
+
+The built-in keyboard arrives over ACPI with **neither a VID nor a PID** (spec assumption A4, added after that run). DM7 exists because of it, and it is the most consequential case in this section — see §3.4.
+
+### 3.2 Two decisions
+
+| # | Decision | Rationale |
+|---|---|---|
+| D-23 | A field absent on **both** sides is never a match. | `a == b` returns true for two nulls, and the C# semantics are right while answering a different question: "neither device has a serial number" is not "the two devices have the same serial number". With the built-in keyboard having no VID/PID at all, treating "both absent" as agreement lets it match any binding record missing those fields — and being taken for the scanner means every character the operator types is swallowed into the scan buffer. That is the disaster spec §5.7 gives as the reason `PAUSED` exists, produced by a matching bug. |
+| D-24 | Contradictory hard identifiers defeat a weaker agreement. Both sides reporting different VIDs means no match, even if the serials agree. | Serial numbers are unique only within a vendor, and lazy ones such as `1` or `0000` collide across vendors readily. Checking the contradiction first is the safer order: better to ask the operator to rebind than to mistake another device for the scanner. |
+
+### 3.3 Cases
+
+| ID | Scenario | Expected |
+|---|---|---|
+| DM1 | Identical device path | `Exact` |
+| DM2 | Path changed, serial agrees | `High` |
+| DM3 | Only VID/PID agree | `Low` |
+| DM4 | Nothing in common | `None` |
+| DM5 | Neither side has a device path | `None` — **not** an Exact match |
+| DM6 | Neither side has a serial | `None` |
+| DM7 | Built-in keyboard (no VID/PID) against a binding missing them | `None` |
+| DM8 | Empty and whitespace-only fields | Treated as absent |
+| DM9 | Device paths differing only in case | `Exact` |
+| DM10 | Contradicting VID, agreeing serial | `None` (D-24) |
+| DM11 | Two devices of one model | Ambiguous; **cannot** auto-reconnect |
+| DM12 | One exact match, one model-only match | Exact wins; not ambiguous |
+| DM13 | Empty candidate list | No match; no throw |
+| DM14 | Every confidence level against `CanReconnectAutomatically` | Only `High`/`Exact` and unambiguous |
+| DM15 | `null` arguments | Throw `ArgumentNullException` (D-1) |
+
+### 3.4 Why particular cases exist
+
+**DM5, DM6 and DM7 are one rule seen from three angles**, and the rule is D-23. DM5 makes the device paths absent while forcing the VID/PID to differ, so an `Exact` verdict could only come from two nulls comparing equal. DM6 does the same for serials, and matters more than it looks: not every scanner exposes a serial to Windows, so "both absent" is the ordinary case taken on **every reconnect**, not an edge case.
+
+**DM7 is the one that would end the pilot.** If "both absent" counted as agreement, a binding record missing VID/PID — because the device did not report them when bound, or because the configuration was hand-edited — would match the built-in keyboard. The keyboard would be bound as the scanner and every character the operator types swallowed into the scan buffer. Assumption A4 removes the escape: a laptop has no spare keyboard to plug in, and the only way out is the touchpad and the mouse-clickable pause control that spec §5.7 insists on.
+
+**DM9 guards a fault nobody would connect to letter case.** Windows device paths are case-insensitive and the same device can come back differently cased from different APIs or Windows versions. Comparing case-sensitively would fail to match it on reconnect, presenting as "it asks me to rebind every time I plug it in".
+
+**DM11 is spec §6's named scenario in executable form.** Two scanners of one model are indistinguishable at the VID/PID level. Auto-binding one would give an operator holding the wrong gun no warning at all — they would keep scanning while the data came from an unbound device. The result still returns a device rather than null, because the UI needs it to say that two apparently identical devices were found; what prevents the automatic bind is `CanReconnectAutomatically`, not hiding the device.
+
+**DM14 checks every level because that predicate is the only thing standing between a confident-looking match and an automatic bind to the wrong device.** Lowering the bar to `Low` would let two guns of one model stand in for each other; forgetting the ambiguity check would pick arbitrarily between two tied devices. Both look identical on site: the operator scans away with an unbound gun while the UI reports everything as normal.
+
+### 3.5 Guard verified by injecting the violation
+
+| Violation injected | Result |
+|---|---|
+| Replace `BothPresentAndEqual` with a plain case-insensitive `==` | **DM5, DM7, DM3 and DM11 fail together.** DM7 reported the built-in keyboard matching at **`High`** — a confidence that permits automatic reconnection, so the built-in keyboard would have been auto-bound as the scanner. DM5 reported `Exact` from two null paths. |
+
+The injected result is worth recording precisely because it was not a near miss. The naive implementation does not merely weaken the match; it produces the highest confidence that still permits an automatic bind, on the one device whose misidentification disables the operator's keyboard.
+
+---
+
+## 4. Phase A is complete
+
+All of Tasks 1–3, 5a, 6, 7a and 8a are implemented and green: **230 xUnit executions**, zero build warnings, passing on Windows and required to pass on macOS through `ScannerHelper.CrossPlatform.slnf` (acceptance criterion 20).
+
+What remains is Phase B, and it begins at the hard gate. Task 4a is done and its measurements are recorded, but two things it raised are still open and both belong to whoever runs 4b:
+
+- **The figures have not been reproduced on pilot hardware.** Event timing is a property of the machine, and the development machine is not a pilot machine.
+- **Whether the hook sees a complete code.** Task 4a established that this scanner already loses characters between itself and Windows with Scanner Helper not running at all (spec §22.5). No test in Phase A can tell whether the hook receives a complete code or a damaged one — and if the hardware does not deliver it, all of this correct logic produces a confidently wrong result, which is the failure mode spec §19.1 cares about most.
