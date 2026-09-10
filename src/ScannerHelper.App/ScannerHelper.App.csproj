@@ -78,6 +78,53 @@
                system locale.
     -->
     <InvariantGlobalization>false</InvariantGlobalization>
+
+    <!--
+      中文:
+        发布件的身份信息。
+
+        ★ 这不是装饰。规格 §22.1 把杀毒/EDR 列为最高部署风险,而仓库 IT 要把这个
+          可执行文件加进白名单时,第一件事就是右键看属性。一个公司名、产品名、
+          版本号全空的 exe,在那个场景下和一个来路不明的文件没有区别——而它偏偏
+          还在调用 SendInput 往别的程序里打字。
+
+        ★ 版本号会出现在诊断日志的每一行(规格 §15)。现场排查时"他装的还是上一版"
+          是第一个要排除的可能,所以这个号必须是真的,不能一直停在 1.0.0.0 的默认值。
+      English:
+        The artifact's identity. Not decoration: spec §22.1 names antivirus and EDR as the highest
+        deployment risk, and the first thing warehouse IT does before allow-listing an executable is
+        open its properties. An exe with no company, product or version is indistinguishable from an
+        unknown file in that moment — and this one calls SendInput to type into other programs.
+
+        The version also appears on every line of the diagnostic log (spec §15). "They are still
+        running the previous build" is the first thing a field investigation rules out, so the
+        number has to be real rather than the default 1.0.0.0.
+    -->
+    <Version>1.0.0</Version>
+    <Product>Scanner Helper</Product>
+    <AssemblyTitle>Scanner Helper 扫码助手</AssemblyTitle>
+    <Company>Scanner Helper</Company>
+    <Copyright>Copyright (c) 2026</Copyright>
+
+    <!--
+      中文:
+        不生成调试符号。pdb 只对开发机有意义,发到工位上属于"非必要的东西"。
+      English:
+        No debug symbols. A pdb means something only on a development machine; on a workstation it
+        is dead weight.
+    -->
+    <DebugType>none</DebugType>
+
+    <!--
+      中文:
+        不打包 .NET 自带的几十种语言的附属资源。本程序的中英文来自自己的
+        本地化表(规格 §12),框架自带的那些译文一条也用不上。
+      English:
+        Drops .NET's satellite resources for dozens of languages. This program's Chinese and English
+        come from its own localization tables (spec §12) and none of the framework's translations is
+        ever used.
+    -->
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
   </PropertyGroup>
 
   <ItemGroup>
