@@ -295,7 +295,13 @@ public sealed class InputCaptureThread : IDisposable
             _rawInput = new RawInputKeyboardListener(_buffer);
             _rawInput.Register(_windowHandle);
 
-            _hook = new LowLevelKeyboardHook(_buffer);
+            // ★ 走 CreateObserveOnly 而不是普通构造函数：4a 的安全性质
+            //   （没有任何一条通向吞掉的代码路径）因此是结构上成立的，
+            //   而不是靠"这里恰好没返回 Swallow"。这个工具会在真实工作机上跑。
+            // Through CreateObserveOnly rather than the general constructor: 4a's safety property
+            // — no code path to swallowing at all — is then structural rather than resting on
+            // "this call site happens not to return Swallow". This tool runs on live machines.
+            _hook = LowLevelKeyboardHook.CreateObserveOnly(_buffer);
             _hook.Install();
         }
         catch (Exception startupException)

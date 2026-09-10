@@ -2,20 +2,26 @@
 // LowLevelKeyboardHook.cs
 //
 // 中文：
-//   WH_KEYBOARD_LL 的托管封装（Task 4a — 只观测，不拦截）。
+//   WH_KEYBOARD_LL 的托管封装。
 //
-//   ★★ 本阶段的最重要约束：**每一个事件都必须原样放行。**
+//   ★★ 本类只负责**机制**，不持有任何**策略**。
 //
-//     规格 §4.3 把 spike 拆成 4a 和 4b 两段，理由写得很直白：把二者合在一起
-//     做，等于同时在调试"没验证过的逻辑"和"不了解的硬件行为"，而那正是
-//     时序启发式被悄悄引入、用来让症状消失的典型路径。
+//     它把按键从 Windows 那里取出来，把调用方的决定执行下去——放行或吞掉。
+//     谁该被吞掉是 Core 的业务规则（扫码枪？暂停中？热键？），放在这里就
+//     等于让 Windows 互操作层知道业务逻辑，而规格 §17 明确要求这两者分开。
 //
-//     4a 只回答问题，不改变任何行为。因此本类**没有**任何吞掉按键的代码路径——
-//     不是"默认放行"，而是根本没有另一条路可走。回调唯一的出口就是
-//     CallNextHookEx。这使得本工具可以安全地在真实工作机上运行：它对系统的
-//     影响仅限于每次按键多几十纳秒。
+//   ★★ 4a 与 4b 的区别在**调用方**，而且是结构上的区别。
 //
-//     拦截与重放是 4b 的事，而且必须建立在 4a 量出来的数据之上。
+//     规格 §4.3 把 spike 拆成两段，理由写得很直白：把二者合在一起做，等于
+//     同时在调试"没验证过的逻辑"和"不了解的硬件行为"，而那正是时序启发式
+//     被悄悄引入、用来让症状消失的典型路径。
+//
+//     4a 只观测，因此它的诊断工具敢在真实工作机上跑——但那个保证不能靠
+//     "记得别返回 Swallow"。<see cref="CreateObserveOnly"/> 返回的钩子，
+//     其回调恒为 PassThrough 且不接受任何外部输入：即便调用方想让它吞掉
+//     某个键，也无从下手。
+//
+//     4b 需要拦截，走普通构造函数，由调用方提供决策。
 //
 //   ★ 必须装在有消息循环的线程上。
 //
@@ -25,22 +31,23 @@
 //     就是收不到事件。实际使用中就装在 WPF 的界面线程上。
 //
 // English:
-//   A managed wrapper over WH_KEYBOARD_LL (Task 4a — observe only, never intercept).
+//   A managed wrapper over WH_KEYBOARD_LL.
 //
-//   The overriding constraint at this stage: every event is passed through unchanged.
+//   This class owns the mechanism and none of the policy. It takes keystrokes from Windows and
+//   carries out the caller's verdict — pass through or swallow. What may be swallowed is Core's
+//   business rule (the scanner? paused? a hotkey?), and deciding it here would put business logic
+//   inside the interop layer, which spec §17 requires to stay separate.
 //
-//   Spec §4.3 splits the spike into 4a and 4b for a plainly stated reason: doing both
-//   at once means debugging unproven logic against unknown hardware behavior
-//   simultaneously, which is exactly how timing heuristics get introduced to make
+//   The difference between 4a and 4b lies in the caller, structurally. Spec §4.3 splits the spike
+//   for a plainly stated reason: doing both at once means debugging unproven logic against unknown
+//   hardware behavior simultaneously, which is exactly how timing heuristics get introduced to make
 //   symptoms disappear.
 //
-//   4a answers questions and changes no behavior. This class therefore contains no
-//   code path that swallows a keystroke — not "passes through by default", but no
-//   other route at all. The callback's only exit is CallNextHookEx. That is what makes
-//   the tool safe to run on a real working machine: its entire effect on the system is
-//   a few dozen nanoseconds per keystroke.
-//
-//   Interception and replay belong to 4b, and must be built on what 4a measures.
+//   4a observes only, which is what makes its harness safe to run on a live working machine — and
+//   that guarantee cannot rest on "remember not to return Swallow". The hook returned by
+//   CreateObserveOnly has a callback that is unconditionally PassThrough and takes no outside
+//   input: a caller wanting it to swallow a key has nowhere to reach. 4b needs interception and
+//   goes through the general constructor, supplying its own decision.
 //
 //   The hook must be installed on a thread with a message loop. A low-level keyboard
 //   hook's callback is driven through the message queue of the thread that installed
@@ -64,12 +71,12 @@ using ScannerHelper.Win32.Observation;
 namespace ScannerHelper.Win32;
 
 /// <summary>
-/// 中文：低层键盘钩子。4a 阶段只观测，绝不拦截任何按键。
-/// English: The low-level keyboard hook. In 4a it observes only and never intercepts.
+/// 中文：低层键盘钩子。只负责机制，决策由调用方提供。
+/// English: The low-level keyboard hook. Mechanism only; the caller supplies the policy.
 /// </summary>
 public sealed class LowLevelKeyboardHook : IDisposable
 {
-    private readonly ObservationBuffer _buffer;
+    private readonly KeyboardEventHandler _handler;
 
     /// <summary>
     /// 中文：★ 回调委托必须由托管代码持有，不能只作为参数传给
@@ -89,20 +96,70 @@ public sealed class LowLevelKeyboardHook : IDisposable
     /// <summary>
     /// 中文：
     ///   构造钩子封装。此时并不安装钩子，安装请调用 <see cref="Install"/>。
-    ///   输入：buffer 观测事件的去处，不得为 null。
+    ///   输入：handler 每次按键的处理与决策，不得为 null。
+    ///
+    ///   ★ 只观测的用法请走 <see cref="CreateObserveOnly"/>，不要自己传一个
+    ///     "总是返回 PassThrough" 的 handler。区别在于前者**结构上**无法吞掉
+    ///     按键，后者只是**这次**没吞——而 4a 的诊断工具敢在真实工作机上跑，
+    ///     靠的正是前者那种保证。
     /// English:
-    ///   Creates the wrapper without installing anything; call <see cref="Install"/>
-    ///   for that. buffer is where observed events go and must not be null.
+    ///   Creates the wrapper without installing anything; call <see cref="Install"/> for that.
+    ///   handler both records and decides for each keystroke and must not be null.
+    ///
+    ///   For observe-only use go through <see cref="CreateObserveOnly"/> rather than passing a
+    ///   handler that happens to always return PassThrough. The former structurally cannot
+    ///   swallow while the latter merely does not this time — and what makes 4a's harness safe to
+    ///   run on a live working machine is the former kind of guarantee.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">
+    /// 中文：handler 为 null。 English: handler is null.
+    /// </exception>
+    public LowLevelKeyboardHook(KeyboardEventHandler handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+
+        _handler = handler;
+        _callback = OnKeyboardEvent;
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   建一个**只观测、绝不拦截**的钩子（Task 4a）。
+    ///   输入：buffer 观测事件的去处，不得为 null。
+    ///
+    ///   ★ 这个工厂方法存在的理由，是把 4a 的安全性质保留成一件**结构上**
+    ///     成立的事，而不是一句注释。
+    ///
+    ///     4b 需要拦截，所以钩子本身必须能吞掉按键。但 4a 的诊断工具敢在
+    ///     真实工作机上跑，靠的正是"它没有任何一条通向吞掉的代码路径"。
+    ///     两者不能都靠同一个构造函数加一句"记得别返回 Swallow"来保证。
+    ///
+    ///     这里返回的钩子，其回调恒为 PassThrough，且那个 lambda 不接受
+    ///     任何外部输入——即便调用方想让它吞掉某个键，也无从下手。
+    /// English:
+    ///   Creates a hook that observes and never intercepts (Task 4a).
+    ///
+    ///   This factory exists to keep 4a's safety property structural rather than a comment. 4b
+    ///   needs interception, so the hook itself must be able to swallow — yet what makes 4a's
+    ///   harness safe to run on a live working machine is that it has no code path to swallowing
+    ///   at all. Both cannot rest on one constructor plus a note saying "remember not to return
+    ///   Swallow".
+    ///
+    ///   The hook returned here has a callback that is unconditionally PassThrough, in a lambda
+    ///   that takes no outside input: a caller wanting it to swallow a key has nowhere to reach.
     /// </summary>
     /// <exception cref="ArgumentNullException">
     /// 中文：buffer 为 null。 English: buffer is null.
     /// </exception>
-    public LowLevelKeyboardHook(ObservationBuffer buffer)
+    public static LowLevelKeyboardHook CreateObserveOnly(ObservationBuffer buffer)
     {
         ArgumentNullException.ThrowIfNull(buffer);
 
-        _buffer = buffer;
-        _callback = OnKeyboardEvent;
+        return new LowLevelKeyboardHook((in ObservedInputEvent observedEvent) =>
+        {
+            buffer.Write(observedEvent);
+            return HookDecision.PassThrough;
+        });
     }
 
     /// <summary>
@@ -232,7 +289,7 @@ public sealed class LowLevelKeyboardHook : IDisposable
             const uint injectedFlags =
                 KeyboardHookNative.LLKHF_INJECTED | KeyboardHookNative.LLKHF_LOWER_IL_INJECTED;
 
-            _buffer.Write(new ObservedInputEvent(
+            var observedEvent = new ObservedInputEvent(
                 Channel: InputChannel.Hook,
                 Timestamp: timestamp,
                 VirtualKey: (ushort)keyEvent.vkCode,
@@ -241,12 +298,43 @@ public sealed class LowLevelKeyboardHook : IDisposable
                 IsKeyUp: (keyEvent.flags & KeyboardHookNative.LLKHF_UP) != 0,
                 IsInjected: (keyEvent.flags & injectedFlags) != 0,
 
-                // 钩子通道拿不到设备身份——这正是 4a 要研究的问题本身。
+                // 钩子通道拿不到设备身份——这正是 4a 研究的问题本身。
                 // The hook channel has no device identity; that is 4a's subject.
-                DeviceHandle: 0));
+                DeviceHandle: 0);
+
+            // 步骤 4 / Step 4
+            //
+            // ★ 决策交给 handler，而不是在这里判断。这条边界很重要：
+            //   本类只负责"把事件取出来、把决定执行下去"，不持有任何关于
+            //   扫码枪、模式、暂停的知识。谁能被吞掉是 Core 的业务规则，
+            //   放在这里就等于让 Windows 互操作层知道业务逻辑（规格 §17）。
+            //
+            // The decision belongs to the handler rather than to this method. The boundary
+            // matters: this class extracts the event and carries out the verdict, holding no
+            // knowledge of scanners, modes or pausing. What may be swallowed is Core's business
+            // rule, and deciding it here would put business logic inside the interop layer
+            // (spec §17).
+            if (_handler(observedEvent) == HookDecision.Swallow)
+            {
+                // ★ 返回非零即吞掉：业务软件永远不会看到这次按键（规格 §5.4）。
+                //
+                //   这是整个产品唯一能阻止原始条码泄漏进业务软件的地方。
+                //   Task 4a 实测钩子 100% 先于 WM_INPUT 到达，因此走到这里时
+                //   往往还不知道是谁按的——调用方按规格 §5.3 先吞后补，
+                //   而"补"是它的责任，不是这里的。
+                //
+                // A non-zero return swallows it and the business application never sees the
+                // keystroke (spec §5.4). This is the one place in the product able to stop a raw
+                // barcode leaking into the business application. Task 4a measured the hook
+                // preceding WM_INPUT 100% of the time, so at this point the source is usually
+                // still unknown: the caller swallows first and replays later per spec §5.3, and
+                // the replaying is its responsibility rather than this method's.
+                return new IntPtr(1);
+            }
         }
 
-        // 步骤 4 / Step 4 —— 唯一的出口，永远放行 / the only exit; always passes through
+        // 步骤 5 / Step 5 —— 放行，转交给钩子链上的下一个钩子
+        // Step 5 — pass through to the next hook in the chain
         return KeyboardHookNative.CallNextHookEx(IntPtr.Zero, nCode, wParam, lParam);
     }
 }
