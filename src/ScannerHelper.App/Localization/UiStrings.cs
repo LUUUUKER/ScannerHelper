@@ -81,6 +81,14 @@ public static class UiStrings
         ["ModeSnSubtitle"] = "The scanned code is sent as-is",
         ["ModeSkuSubtitle"] = "The SKU is extracted from the scanned code",
         ["SwitchModeHint"] = "F8   Switch mode",
+
+        // ★ F8 被别的程序占着时用这一句。界面绝不能一边说"按 F8"一边知道 F8
+        //   按了没用——规格 §19.1 不许显示没有验证过的东西，那既包括运行状态，
+        //   也包括一句操作提示。
+        // Used when another program holds F8. The UI must never say "press F8" while knowing that
+        // F8 does nothing: spec §19.1 forbids presenting anything unverified, and that covers
+        // instructions as much as operational state.
+        ["SwitchModeHintUnavailable"] = "F8 is taken by another program — use the button",
         ["SwitchMode"] = "Switch mode",
 
         ["Connected"] = "✓  Scanner connected",
@@ -175,6 +183,7 @@ public static class UiStrings
         ["ModeSnSubtitle"] = "扫到的码原样发出",
         ["ModeSkuSubtitle"] = "从扫到的码里提取 SKU",
         ["SwitchModeHint"] = "F8   切换模式",
+        ["SwitchModeHintUnavailable"] = "F8 被别的程序占用了，请用下面的按钮",
         ["SwitchMode"] = "切换模式",
 
         ["Connected"] = "✓  扫码枪已连接",

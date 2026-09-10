@@ -161,6 +161,24 @@ public sealed class ScannerSession : IDisposable
     public event EventHandler? ErrorRaised;
 
     /// <summary>
+    /// 中文：
+    ///   模式刚被切换。带上切换**之后**的模式。
+    ///
+    ///   ★ 单独一个事件，而不是让订阅方从 Changed 里自己比对。规格 §7 要求切换
+    ///     模式时出声，而"出声"必须精确对应"这一次切换"——从状态变化里推断
+    ///     会在每一次刷新时都要问一遍"是不是刚才变的"，而那种推断迟早会在某个
+    ///     边界上多响一声或少响一声。
+    /// English:
+    ///   The mode was just toggled, carrying the mode after the change.
+    ///
+    ///   A separate event rather than leaving subscribers to diff Changed. Spec §7 requires a sound
+    ///   on mode change, and the sound must correspond exactly to this toggle; inferring it from
+    ///   state would ask "did it just change?" on every refresh, and such inference eventually
+    ///   plays one sound too many or too few at some boundary.
+    /// </summary>
+    public event EventHandler<ScanMode>? ModeToggled;
+
+    /// <summary>
     /// 中文：本机可用的串口。
     /// English: The COM ports available on this machine.
     /// </summary>
@@ -256,11 +274,15 @@ public sealed class ScannerSession : IDisposable
     /// </summary>
     public void ToggleMode()
     {
+        ScanMode mode;
+
         lock (_gate)
         {
             _modeManager.Toggle();
+            mode = _modeManager.CurrentMode;
         }
 
+        ModeToggled?.Invoke(this, mode);
         Changed?.Invoke(this, EventArgs.Empty);
     }
 

@@ -54,6 +54,7 @@ using System.Windows.Media;
 using System.Windows.Threading;
 using ScannerHelper.App.Localization;
 using ScannerHelper.Core.Domain;
+using ScannerHelper.Win32;
 
 namespace ScannerHelper.App;
 
@@ -73,8 +74,21 @@ public partial class MainWindow : Window
     private static readonly TimeSpan RefreshInterval = TimeSpan.FromSeconds(1);
 
     private readonly DispatcherTimer _refreshTimer;
+
+    /// <summary>
+    /// 中文：
+    ///   全局热键。**它自己拥有一个仅消息窗口**，与本窗口的可见性无关——
+    ///   最小化切到 Compact 时本窗口是隐藏的，热键必须照常管用。
+    /// English:
+    ///   The global hotkeys. They own a message-only window of their own and do not depend on this
+    ///   window's visibility: minimizing to Compact hides this window while the hotkeys must keep
+    ///   working.
+    /// </summary>
+    private readonly GlobalHotkeyListener? _hotkeys;
+
     private CompactWindow? _compactWindow;
     private bool _exitConfirmed;
+    private bool _isToggleHotkeyAvailable = true;
 
     /// <summary>
     /// 中文：构造窗口并接上会话。
@@ -94,6 +108,27 @@ public partial class MainWindow : Window
 
         Localizer.LanguageChanged += (_, _) => Refresh();
 
+        // ★ 热键注册不上不该让程序起不来：注册失败是常态（别的程序占着），
+        //   而没有热键的程序仍然完全可用——所有操作都有鼠标入口。
+        // A failure to set up hotkeys must not stop the program: failing is ordinary (another
+        // program holds the key) and a program without hotkeys is still fully usable, every action
+        // having a mouse entrance.
+        try
+        {
+            _hotkeys = new GlobalHotkeyListener();
+            _hotkeys.Pressed += OnHotkeyPressed;
+        }
+        catch (System.ComponentModel.Win32Exception)
+        {
+            _hotkeys = null;
+        }
+
+        if (Session is { } soundSession)
+        {
+            soundSession.ModeToggled += OnModeToggled;
+            soundSession.ErrorRaised += OnErrorSound;
+        }
+
         _refreshTimer = new DispatcherTimer(DispatcherPriority.Background)
         {
             Interval = RefreshInterval,
@@ -102,6 +137,109 @@ public partial class MainWindow : Window
         _refreshTimer.Start();
 
         Refresh();
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   模式变了，出一声（规格 §7）。
+    ///   工人低头搬货、双手都占着，声音是替代看屏幕的那条通道。
+    /// English:
+    ///   The mode changed; play a sound (spec §7). The operator is bent over goods with both hands
+    ///   busy, and sound is the channel that replaces looking at the screen.
+    /// </summary>
+    private void OnModeToggled(object? sender, ScanMode mode)
+        => Sounds.ModeChanged(mode, CurrentApp.Settings.ModeSwitchSoundEnabled);
+
+    /// <summary>
+    /// 中文：一枪没能发出去，出一声（规格 §13 的 ErrorSoundEnabled）。
+    /// English: A scan did not go out; play a sound (spec §13's ErrorSoundEnabled).
+    /// </summary>
+    private void OnErrorSound(object? sender, EventArgs e)
+        => Sounds.Error(CurrentApp.Settings.ErrorSoundEnabled);
+
+    /// <summary>
+    /// 中文：
+    ///   热键被按下。**在界面线程上触发**（见 GlobalHotkeyListener），不需要切线程。
+    ///
+    ///   这里不必再判断"现在该不该响应"——规格 §7 的条件已经由**注册与否**表达了：
+    ///   没有待决错误时 F10 与 Esc 根本没被注册，那两个键压根到不了这里。
+    /// English:
+    ///   A hotkey was pressed, raised on the UI thread (see GlobalHotkeyListener) with no
+    ///   marshalling needed.
+    ///
+    ///   No "should this apply now" check is needed: spec §7's conditions are expressed by whether
+    ///   the key is registered at all. With nothing pending, F10 and Escape are not registered and
+    ///   never reach here.
+    /// </summary>
+    private void OnHotkeyPressed(object? sender, HotkeyPressedEventArgs e)
+    {
+        switch (e.Hotkey)
+        {
+            case ScannerHotkey.ToggleMode:
+                Session?.ToggleMode();
+                break;
+
+            case ScannerHotkey.ForceSend:
+                Session?.ForceSend();
+                break;
+
+            case ScannerHotkey.Discard:
+                Session?.Discard();
+                break;
+        }
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   按当前状态决定注册哪几个热键——规格 §7 的「放行表」就是这个方法。
+    ///
+    ///   ★ 暂停时全部注销。§7 最后一行写着"暂停时一律放行"，而注销之后那几个键
+    ///     根本不经过我们，放行是结构上的结果而不是一个判断。
+    ///
+    ///   ★ F10 与 Esc 只在有待决错误时注册。§7 明说 Esc "在日常网页操作里太常用，
+    ///     不能无条件吞掉"——没注册就等于没抢，工人在浏览器里按 Esc 照样管用。
+    ///
+    ///   ★ F8 注册不上时改口。裸键会被别的程序抢走，那时界面上"按 F8 切换模式"
+    ///     就是一句假话（规格 §19.1）。
+    /// English:
+    ///   Decides which hotkeys are registered from the current state — this method *is* spec §7's
+    ///   pass-through table.
+    ///
+    ///   Everything is unregistered while paused: §7's last row passes everything through, and once
+    ///   unregistered those keys never reach us, so passing through is structural rather than a
+    ///   judgment. F10 and Escape are registered only while an error is pending: §7 says Escape is
+    ///   far too common in ordinary web use to swallow unconditionally, and not registering is not
+    ///   taking it, so Escape keeps working in the browser. When F8 cannot be taken the hint
+    ///   changes, because "press F8 to switch mode" would then be false (spec §19.1).
+    /// </summary>
+    private void SyncHotkeys(SessionSnapshot snapshot)
+    {
+        if (_hotkeys is not { } hotkeys)
+        {
+            _isToggleHotkeyAvailable = false;
+            return;
+        }
+
+        if (snapshot.IsPaused)
+        {
+            hotkeys.Unregister(ScannerHotkey.ToggleMode);
+            hotkeys.Unregister(ScannerHotkey.ForceSend);
+            hotkeys.Unregister(ScannerHotkey.Discard);
+            return;
+        }
+
+        _isToggleHotkeyAvailable = hotkeys.Register(ScannerHotkey.ToggleMode);
+
+        if (snapshot.PendingErrorRawCode is not null)
+        {
+            hotkeys.Register(ScannerHotkey.ForceSend);
+            hotkeys.Register(ScannerHotkey.Discard);
+        }
+        else
+        {
+            hotkeys.Unregister(ScannerHotkey.ForceSend);
+            hotkeys.Unregister(ScannerHotkey.Discard);
+        }
     }
 
     private static App CurrentApp => (App)Application.Current;
@@ -168,6 +306,8 @@ public partial class MainWindow : Window
         var snapshot = session.Snapshot();
         var strings = Localizer.Strings;
 
+        SyncHotkeys(snapshot);
+
         HazardStripe.Visibility = Visibility.Collapsed;
         DisconnectedBar.Visibility = Visibility.Collapsed;
         ModeOnResumeText.Visibility = Visibility.Collapsed;
@@ -220,7 +360,8 @@ public partial class MainWindow : Window
             StateHeadingText.Text = strings["ModeHeading"];
             StateTitleText.Text = ModeLabel(snapshot.Mode, strings);
             StateSubtitleText.Text = strings[isSn ? "ModeSnSubtitle" : "ModeSkuSubtitle"];
-            SwitchHintText.Text = strings["SwitchModeHint"];
+            SwitchHintText.Text = strings[
+                _isToggleHotkeyAvailable ? "SwitchModeHint" : "SwitchModeHintUnavailable"];
         }
 
         // ★ 暂停按钮**永远可点**。它是安全阀（规格 §5.7），而一个会在某些状态下
@@ -422,6 +563,14 @@ public partial class MainWindow : Window
 
         _exitConfirmed = true;
         _refreshTimer.Stop();
+
+        // ★ 必须真的注销热键。它们是系统范围的：注册挂着不放，那几个键在别的
+        //   程序里就一直失灵，而工人不会把"F8 不好使了"和这个扫码程序联系起来。
+        // Hotkeys must actually be released. They are system-wide, and a registration left behind
+        // leaves those keys dead in every other program — and nobody connects "F8 stopped working"
+        // with this scanner program.
+        _hotkeys?.Dispose();
+
         SaveBounds();
 
         _compactWindow?.CloseForExit();
