@@ -171,6 +171,42 @@ public abstract record ScanOutcome
     /// </summary>
     public sealed record Cancelled(string RawCode) : ScanOutcome;
 
+    /// <summary>
+    /// 中文：
+    ///   工人扫了一张命令条码，模式被切换了（见 ScanCommand）。
+    ///
+    ///   ★ 这一枪**没有**发给业务软件，但必须记一行。
+    ///
+    ///     日志里最难回答的问题是"这批货为什么有几件是按 SN 发的、有几件是按
+    ///     SKU 发的"。答案通常就是中间某一刻模式被切了，而切换点如果不在日志里，
+    ///     那条时间线上就只剩一堆看起来自相矛盾的记录。
+    /// English:
+    ///   The operator scanned a command barcode and the mode changed (see ScanCommand).
+    ///
+    ///   This scan is not sent to the business application, but it must be recorded. The hardest
+    ///   question a log gets asked is why part of a batch went out as SN and part as SKU; the answer
+    ///   is usually that the mode changed partway, and without the switch in the log the timeline
+    ///   holds nothing but records that appear to contradict each other.
+    /// </summary>
+    public sealed record ModeCommand(ScanMode Mode, string RawCode) : ScanOutcome;
+
+    /// <summary>
+    /// 中文：
+    ///   条码带着本程序的前缀，但命令认不出来（见 ScanCommand）。
+    ///
+    ///   ★ 既没发给业务软件，也不能不吭声。印错的纸、旧程序遇上新命令——两者
+    ///     都会走到这里，而两者都需要工人当场知道"这张纸没起作用"，否则他会以为
+    ///     模式已经切了，接着按错的模式扫一整批。
+    /// English:
+    ///   The code carries this program's prefix but its command is unrecognized (see ScanCommand).
+    ///
+    ///   It is neither forwarded nor passed over in silence. A misprinted sheet and an older build
+    ///   meeting a newer command both arrive here, and both need the operator to learn immediately
+    ///   that the sheet did nothing — otherwise they believe the mode changed and scan a whole batch
+    ///   under the wrong one.
+    /// </summary>
+    public sealed record UnknownCommand(string RawCode) : ScanOutcome;
+
     public sealed record ParseFailed(ParseResult.Failure Failure) : ScanOutcome;
 
     /// <summary>

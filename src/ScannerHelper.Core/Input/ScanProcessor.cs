@@ -227,6 +227,43 @@ public sealed class ScanProcessor
             return;
         }
 
+        // 步骤 2.5 —— 命令条码：切模式，不发出去（见 ScanCommand）
+        //
+        // ★ 位置是有讲究的：在**暂停判断之后**，在其余一切之前。
+        //
+        //   在暂停之后，是因为暂停的承诺没有例外——见 ScanCommand 的文件头。
+        //
+        //   在其余一切之前，是因为一张命令条码永远不该被当成货品去解析、校验、
+        //   或者发进业务软件。放到解析后面去判断，等于让 #SH:SKU# 先去撞一遍
+        //   SKU 规则：撞不上就报一个莫名其妙的解析失败，撞上了更糟——一张纸
+        //   变成了一件货。
+        //
+        // Step 2.5 — command barcodes: switch the mode, emit nothing (see ScanCommand).
+        //
+        // The position matters: after the paused check, before everything else. After paused,
+        // because that promise has no exceptions (see ScanCommand's header). Before everything
+        // else, because a command sheet must never be parsed, validated or sent as if it were
+        // goods: deciding after parsing would run #SH:SKU# through the SKU rule first, which either
+        // reports a baffling parse failure or — worse — succeeds, turning a sheet of paper into an
+        // item.
+        var command = ScanCommand.Recognize(rawCode);
+
+        if (command != ScanCommandKind.None)
+        {
+            State = ScanPipelineState.Idle;
+
+            if (command == ScanCommandKind.Unknown)
+            {
+                RaiseProcessed(new ScanOutcome.UnknownCommand(rawCode));
+                return;
+            }
+
+            var target = command == ScanCommandKind.SwitchToSn ? ScanMode.Sn : ScanMode.Sku;
+            _modeManager.SetMode(target);
+            RaiseProcessed(new ScanOutcome.ModeCommand(target, rawCode));
+            return;
+        }
+
         State = ScanPipelineState.Processing;
 
         // 步骤 3 —— SN 是流水线内部的恒等变换，不是旁路（规格 §5.7）

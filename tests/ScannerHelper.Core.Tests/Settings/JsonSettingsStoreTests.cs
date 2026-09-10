@@ -737,7 +737,7 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.NotNull(settings.SkuValidation);
         Assert.NotNull(settings.Diagnostics);
 
-        Assert.Equal("F8", settings.Hotkeys.ToggleMode);
+        Assert.Equal("Insert", settings.Hotkeys.ToggleMode);
         Assert.Equal(SkuParsingRuleType.FixedPosition, settings.SkuParsing.RuleType);
         Assert.True(settings.SkuValidation.IgnoreCase);
         Assert.Equal(14, settings.Diagnostics.LogRetentionDays);

@@ -276,6 +276,52 @@
 
                 <!--
                     中文：
+                      模式切换按键（现场反馈：F8 在不同电脑上被不同的常驻软件占用）。
+
+                      ★ 旁边那句"这台电脑上可用 / 被占用"是这一节存在的理由。
+                        RegisterHotKey 的成败是**关于这台机器的确定答案**，比任何
+                        一份"哪些键通常空着"的清单都可靠。把它当场显示出来，装机的
+                        人选完就知道成没成，而不是装完走人、工人第二天发现按了没反应。
+
+                      ★ 下面那个按钮通向完全不碰键盘的那条路：命令条码。
+                    English:
+                      The mode-switch key (field report: F8 is taken by different resident software
+                      on different PCs).
+
+                      The "available / taken on this PC" line beside it is why this section exists:
+                      whether RegisterHotKey succeeds is a definite answer about this machine, more
+                      reliable than any list of keys that are usually free. Showing it on the spot
+                      means whoever installs it knows immediately, rather than leaving and having the
+                      operator find the next morning that pressing it does nothing.
+
+                      The button below leads to the path that never touches the keyboard: command
+                      barcodes.
+                -->
+                <TextBlock FontWeight="SemiBold" Margin="0,18,0,6"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsHotkeyGroup]}" />
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="150" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                               Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsToggleKey]}" />
+                    <ComboBox x:Name="ToggleKeyCombo" Grid.Column="1" Height="26" Margin="8,0,0,0"
+                              VerticalContentAlignment="Center"
+                              SelectionChanged="OnToggleKeyChanged" />
+                    <TextBlock x:Name="ToggleKeyStatusText" Grid.Column="2" Margin="10,0,0,0"
+                               VerticalAlignment="Center" FontSize="12" TextWrapping="Wrap" />
+                </Grid>
+                <Button x:Name="CommandSheetsButton" Margin="0,10,0,0" Height="28"
+                        Padding="12,0" HorizontalAlignment="Left" Click="OnCommandSheetsClicked"
+                        Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsCommandSheets]}" />
+                <TextBlock Margin="2,4,0,0" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsCommandSheetsHint]}" />
+
+                <!--
+                    中文：
                       诊断日志（规格 §15）。
 
                       ★ 遮码开关配一句说明，写明"遮成什么样"。工人要判断的是

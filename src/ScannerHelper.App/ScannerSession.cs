@@ -77,6 +77,21 @@ namespace ScannerHelper.App;
 /// English: One instantaneous snapshot for the UI, taken all at once so that properties read one
 ///          by one cannot disagree.
 /// </summary>
+/// <param name="LastScanNoticeKey">
+/// 中文：
+///   最近一枪的"说明"，已经是本地化的键；null 表示这一枪是普通的一枪。
+///
+///   命令条码走的是这条路：那一枪**没有发给业务软件**，所以 LastScanEmitted 是
+///   null，但界面上不能只显示一个原始码而不说发生了什么——工人扫了一下墙上的纸，
+///   他需要当场看到"切到 SKU 模式了"，否则无从判断那一下到底起没起作用。
+/// English:
+///   An explanation for the most recent scan, as a localization key; null for an ordinary scan.
+///
+///   Command barcodes travel this way: the scan is not sent to the business application, so
+///   LastScanEmitted is null, but showing a bare raw code without saying what happened is not
+///   enough — the operator scanned a sheet on the wall and needs to see "switched to SKU" right
+///   then, or they have no way to tell whether it worked.
+/// </param>
 /// <param name="LastScanFailureKey">
 /// 中文：最近一次失败的原因，已经是本地化的键；null 表示没有待决错误。
 /// English: The most recent failure's reason as a localization key, or null when nothing is
@@ -91,6 +106,7 @@ public readonly record struct SessionSnapshot(
     string? LastScanFailureKey,
     string? LastScanRawCode,
     string? LastScanEmitted,
+    string? LastScanNoticeKey,
     TimeSpan? TimeSinceLastScan,
     string? LastFaultMessage,
     string? SuggestedPortName,
@@ -126,6 +142,12 @@ public sealed class ScannerSession : IDisposable
     ///   when the window is closed or in Compact, which are often exactly the periods that go wrong.
     /// </summary>
     private readonly IDiagnosticLog _log;
+
+    /// <summary>
+    /// 中文：最近一枪的说明键。见 SessionSnapshot.LastScanNoticeKey。
+    /// English: The notice key for the most recent scan. See SessionSnapshot.LastScanNoticeKey.
+    /// </summary>
+    private string? _lastScanNoticeKey;
 
     private AppSettings _settings;
     private string? _pendingFailureKey;
@@ -204,6 +226,24 @@ public sealed class ScannerSession : IDisposable
     ///   on the reader thread.
     /// </summary>
     public event EventHandler? ErrorRaised;
+
+    /// <summary>
+    /// 中文：
+    ///   扫到一张带本程序前缀、但命令认不出来的条码（见 ScanCommand）。
+    ///
+    ///   ★ 刻意**不**复用 ErrorRaised。ErrorRaised 意味着"有一枪卡住了，等你按
+    ///     F10 或 Esc"，而 F10 是强制把原始码发出去——那正是这里绝不能发生的事：
+    ///     把 #SH:XXX# 发进业务软件，就是往仓库数据里塞了一行谁也追不到来源的
+    ///     脏数据。所以这条路只出声、不进待决状态。
+    /// English:
+    ///   A code carrying this program's prefix whose command is unrecognized (see ScanCommand).
+    ///
+    ///   Deliberately not ErrorRaised. That event means "a scan is stuck awaiting F10 or Esc", and
+    ///   F10 force-sends the raw code — precisely what must not happen here: putting #SH:XXX# into
+    ///   the business application writes a line of dirty data into the warehouse whose origin
+    ///   nobody can trace. This path makes a sound and enters no pending state.
+    /// </summary>
+    public event EventHandler? CommandRejected;
 
     /// <summary>
     /// 中文：
@@ -527,6 +567,7 @@ public sealed class ScannerSession : IDisposable
                 LastScanFailureKey: _pendingFailureKey,
                 LastScanRawCode: _lastScanRawCode,
                 LastScanEmitted: _lastScanEmitted,
+                LastScanNoticeKey: _lastScanNoticeKey,
                 TimeSinceLastScan: timeSinceLastScan,
                 LastFaultMessage: _lastFaultMessage,
                 SuggestedPortName: _suggestedPortName,
@@ -583,6 +624,8 @@ public sealed class ScannerSession : IDisposable
     private void OnScanProcessed(object? sender, ScanProcessedEventArgs args)
     {
         var raised = false;
+        var rejected = false;
+        ScanMode? commandedMode = null;
 
         // ★ 每一枪都记，成功的也记（规格 §15）。
         //
@@ -638,12 +681,56 @@ public sealed class ScannerSession : IDisposable
                     _lastScanEmitted = null;
                     _pendingFailureKey = null;
                     break;
+
+                case ScanOutcome.ModeCommand command:
+                    _lastScanRawCode = command.RawCode;
+                    _lastScanEmitted = null;
+                    _lastScanNoticeKey = command.Mode == ScanMode.Sn
+                        ? "NoticeSwitchedToSn"
+                        : "NoticeSwitchedToSku";
+                    _pendingFailureKey = null;
+                    commandedMode = command.Mode;
+                    break;
+
+                case ScanOutcome.UnknownCommand unknown:
+                    _lastScanRawCode = unknown.RawCode;
+                    _lastScanEmitted = null;
+                    _lastScanNoticeKey = "NoticeUnknownCommand";
+                    _pendingFailureKey = null;
+                    rejected = true;
+                    break;
+            }
+
+            // 普通的一枪要把上一次的说明清掉，否则墙上那张纸的提示会一直挂在
+            // "最近一枪"旁边，而它说的是几十枪之前的事。
+            // An ordinary scan clears the previous notice, or the message from the sheet on the wall
+            // stays next to "most recent scan" while describing something dozens of scans ago.
+            if (commandedMode is null && !rejected)
+            {
+                _lastScanNoticeKey = null;
             }
         }
 
         if (raised)
         {
             ErrorRaised?.Invoke(this, EventArgs.Empty);
+        }
+
+        if (rejected)
+        {
+            CommandRejected?.Invoke(this, EventArgs.Empty);
+        }
+
+        // ★ 走命令条码切换的模式，要和按键切换发出**完全一样**的信号。
+        //   工人分不清也不该分清这两条路——他只知道"模式变了应该响一声"，
+        //   而一条路响、另一条不响，会让他以为扫码那次没起作用。
+        // A mode switched by command barcode raises exactly the same signal as one switched by key.
+        // The operator cannot and should not tell the two paths apart: they know only that a mode
+        // change makes a sound, and one path staying silent reads as "the scan did not work".
+        if (commandedMode is { } mode)
+        {
+            ModeToggled?.Invoke(this, mode);
+            Changed?.Invoke(this, EventArgs.Empty);
         }
     }
 
@@ -678,6 +765,18 @@ public sealed class ScannerSession : IDisposable
 
             ScanOutcome.Cancelled cancelled => new DiagnosticEvent(
                 now, DiagnosticEventKind.Discarded, mode, cancelled.RawCode),
+
+            // 命令条码切换的模式记成 ModeChanged，和按键切换同一种事件——
+            // 读日志的人关心的是"什么时候切的"，不是"用什么切的"；后者放在备注里。
+            // A mode switched by command barcode is recorded as ModeChanged, the same kind as a key
+            // press: a reader cares when it changed, not by what; the how goes in the detail field.
+            ScanOutcome.ModeCommand command => new DiagnosticEvent(
+                now, DiagnosticEventKind.ModeChanged, Describe(command.Mode),
+                Detail: "命令条码 command barcode"),
+
+            ScanOutcome.UnknownCommand unknown => new DiagnosticEvent(
+                now, DiagnosticEventKind.Discarded, mode, unknown.RawCode,
+                Detail: "无法识别的命令条码，未发出 unrecognized command barcode, not emitted"),
 
             _ => new DiagnosticEvent(now, DiagnosticEventKind.Fault, mode,
                 Detail: outcome.ToString()),

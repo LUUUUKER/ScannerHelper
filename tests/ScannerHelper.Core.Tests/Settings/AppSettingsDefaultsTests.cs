@@ -47,7 +47,7 @@
 //
 // 包含的测试 / Tests in this file:
 //   Defaults_match_the_specification            S1~S7 S9 S10
-//   Hotkey_defaults_are_F8_F10_Escape_and_unassigned_pause  S8
+//   Hotkey_defaults_are_Insert_F10_Escape_and_unassigned_pause  S8
 //   No_settings_type_carries_the_scan_mode      S11
 //   No_settings_type_carries_the_paused_state   S12
 //   Serialized_settings_contain_no_mode_or_paused_key  S13
@@ -126,7 +126,12 @@ public class AppSettingsDefaultsTests
 
     /// <summary>
     /// 中文：
-    ///   S8 — 热键默认为 F8 / F10 / Esc，暂停热键默认未分配。
+    ///   S8 — 热键默认为 Insert / F10 / Esc，暂停热键默认未分配。
+    ///
+    ///   ★ 切换键的默认值 2026-09-10 从 F8 改成 Insert，因为现场发现 F8 在不同
+    ///     电脑上被不同的常驻软件占用。这条用例跟着改，不是"让测试通过"，而是
+    ///     默认值本身是一个**产品决定**——它决定了没人动过设置的那台机器上，
+    ///     工人按哪个键。改动它必须是显式的。
     ///   输入：无。输出：无（断言）。
     ///
     ///   暂停热键默认不分配是刻意的（规格 §13.3）：规格要求暂停控件必须是
@@ -135,7 +140,12 @@ public class AppSettingsDefaultsTests
     ///   恰恰按不出去。热键是可选的补充，不是主要入口。
     ///
     /// English:
-    ///   S8 — hotkeys default to F8 / F10 / Esc, with pause unassigned.
+    ///   S8 — hotkeys default to Insert / F10 / Esc, with pause unassigned.
+    ///
+    ///   The toggle default changed from F8 to Insert on 2026-09-10, after the field found F8 taken
+    ///   by different resident software on different PCs. This case changes with it not to make a
+    ///   test pass but because the default is a product decision: it determines which key the
+    ///   operator presses on a machine nobody configured, and changing it must be deliberate.
     ///
     ///   Leaving pause unassigned is deliberate (spec §13.3). The pause control must
     ///   be mouse-reachable because the failure it rescues is "the keyboard stopped
@@ -144,11 +154,11 @@ public class AppSettingsDefaultsTests
     ///   hotkey is an optional addition, never the primary route.
     /// </summary>
     [Fact]
-    public void Hotkey_defaults_are_F8_F10_Escape_and_unassigned_pause()
+    public void Hotkey_defaults_are_Insert_F10_Escape_and_unassigned_pause()
     {
         var hotkeys = new AppSettings().Hotkeys;
 
-        Assert.Equal("F8", hotkeys.ToggleMode);
+        Assert.Equal("Insert", hotkeys.ToggleMode);
         Assert.Equal("F10", hotkeys.ForceSend);
         Assert.Equal("Escape", hotkeys.Cancel);
         Assert.Null(hotkeys.PauseResume);

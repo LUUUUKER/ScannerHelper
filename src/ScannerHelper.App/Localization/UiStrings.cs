@@ -80,15 +80,26 @@ public static class UiStrings
         ["ModeSku"] = "SKU MODE",
         ["ModeSnSubtitle"] = "The scanned code is sent as-is",
         ["ModeSkuSubtitle"] = "The SKU is extracted from the scanned code",
-        ["SwitchModeHint"] = "F8   Switch mode",
+        // ★ 键名是参数，不写死。切换键现在可配置（见 HotkeySettings.ToggleMode），
+        //   而一句写死"按 F8"的提示在改过键之后就是一句假话。
+        // The key name is a parameter rather than literal text: the toggle is now configurable (see
+        // HotkeySettings.ToggleMode), and a hardcoded "press F8" becomes a false statement the
+        // moment somebody changes it.
+        ["SwitchModeHint"] = "{0}   Switch mode",
 
-        // ★ F8 被别的程序占着时用这一句。界面绝不能一边说"按 F8"一边知道 F8
+        // ★ 键被别的程序占着时用这一句。界面绝不能一边说"按这个键"一边知道
         //   按了没用——规格 §19.1 不许显示没有验证过的东西，那既包括运行状态，
         //   也包括一句操作提示。
-        // Used when another program holds F8. The UI must never say "press F8" while knowing that
-        // F8 does nothing: spec §19.1 forbids presenting anything unverified, and that covers
-        // instructions as much as operational state.
-        ["SwitchModeHintUnavailable"] = "F8 is taken by another program — use the button",
+        // Used when another program holds the key. The UI must never say "press this" while knowing
+        // that pressing it does nothing: spec §19.1 forbids presenting anything unverified, and that
+        // covers instructions as much as operational state.
+        ["SwitchModeHintUnavailable"] = "{0} is taken by another program — use the button",
+
+        // 命令条码（见 ScanCommand）扫过之后，"最近一枪"旁边显示的说明。
+        // Shown next to "most recent scan" after a command barcode (see ScanCommand).
+        ["NoticeSwitchedToSn"] = "(switched to SN mode)",
+        ["NoticeSwitchedToSku"] = "(switched to SKU mode)",
+        ["NoticeUnknownCommand"] = "(unrecognized command sheet — nothing was sent)",
         ["SwitchMode"] = "Switch mode",
 
         ["Connected"] = "✓  Scanner connected",
@@ -192,6 +203,24 @@ public static class UiStrings
             "The one worth hearing: during an error you may be looking at the goods rather than the"
             + " screen.",
         ["SettingsDiagnostics"] = "Diagnostics",
+        // 热键一节（现场反馈：F8 在不同电脑上被不同软件占用）。
+        // The hotkey section (field report: F8 is taken by different software on different PCs).
+        ["SettingsHotkeyGroup"] = "Mode switch key",
+        ["SettingsToggleKey"] = "Key",
+
+        // ★ 这两句是这一节存在的理由。RegisterHotKey 的成败是**这台机器上的**
+        //   确定答案，比任何一份"哪些键通常空着"的猜测都可靠——所以直接把它
+        //   显示出来，让装机的人当场换一个，而不是装完才发现按了没反应。
+        // These two lines are why the section exists. Whether RegisterHotKey succeeds is a definite
+        // answer about this machine, more reliable than any guess at which keys are usually free —
+        // so it is shown outright, letting whoever installs it change the key on the spot rather
+        // than discovering after the fact that pressing it does nothing.
+        ["HotkeyAvailable"] = "✓  Available on this PC",
+        ["HotkeyTaken"] = "✗  Taken by another program on this PC",
+        ["SettingsCommandSheets"] = "Print the mode-switch sheets",
+        ["SettingsCommandSheetsHint"] =
+            "Tape them to the workstation and scan one to switch — no key needed",
+
         ["SettingsMaskBarcodes"] = "Mask barcode content in the log",
         ["SettingsMaskBarcodesHint"] =
             "Keeps the first and last two characters and the length: AB************89. Enough to"
@@ -223,8 +252,11 @@ public static class UiStrings
         ["ModeSku"] = "SKU MODE",
         ["ModeSnSubtitle"] = "扫到的码原样发出",
         ["ModeSkuSubtitle"] = "从扫到的码里提取 SKU",
-        ["SwitchModeHint"] = "F8   切换模式",
-        ["SwitchModeHintUnavailable"] = "F8 被别的程序占用了，请用下面的按钮",
+        ["SwitchModeHint"] = "{0}   切换模式",
+        ["SwitchModeHintUnavailable"] = "{0} 被别的程序占用了，请用下面的按钮",
+        ["NoticeSwitchedToSn"] = "（已切到 SN 模式）",
+        ["NoticeSwitchedToSku"] = "（已切到 SKU 模式）",
+        ["NoticeUnknownCommand"] = "（认不出的命令条码，什么都没发出去）",
         ["SwitchMode"] = "切换模式",
 
         ["Connected"] = "✓  扫码枪已连接",
@@ -309,6 +341,13 @@ public static class UiStrings
         ["SettingsErrorSound"] = "一枪没发出去时响一声",
         ["SettingsErrorSoundHint"] = "这一声最值得开：出错时你可能正低头看货，看不到屏幕上的红色。",
         ["SettingsDiagnostics"] = "诊断日志",
+        ["SettingsHotkeyGroup"] = "模式切换按键",
+        ["SettingsToggleKey"] = "按键",
+        ["HotkeyAvailable"] = "✓  这台电脑上可用",
+        ["HotkeyTaken"] = "✗  这台电脑上被别的程序占用了",
+        ["SettingsCommandSheets"] = "打印模式切换条码",
+        ["SettingsCommandSheetsHint"] = "贴在工位上，扫一下就切换，完全不用碰键盘",
+
         ["SettingsMaskBarcodes"] = "日志里遮住条码内容",
         ["SettingsMaskBarcodesHint"] =
             "保留首尾各两位和长度：AB************89。够用来查问题，又不会在磁盘上留下一份完整的货品流水。",

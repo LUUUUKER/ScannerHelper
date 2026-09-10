@@ -37,12 +37,33 @@ namespace ScannerHelper.Core.Settings;
 public sealed class HotkeySettings
 {
     /// <summary>
-    /// 中文：切换 SN / SKU 模式，默认 F8（规格 §7）。
-    ///       仅非扫码枪的物理键盘可触发，该判定由 HotkeyCoordinator 负责。
-    /// English: Toggles SN/SKU, default F8 (spec §7). Only a non-scanner physical
-    ///          keyboard may trigger it; that decision belongs to HotkeyCoordinator.
+    /// 中文：
+    ///   切换 SN / SKU 模式（规格 §7）。**默认 Insert，不再是 F8。**
+    ///
+    ///   ★ 改默认值是现场换来的：F8 在不同电脑上被不同的常驻软件占用，而"这台
+    ///     机器上正好被占"是装完才会发现的事。Insert 在台式和笔记本上都有、位置
+    ///     固定、单独按它的程序极少（Shift+Insert 粘贴是另一个组合，不冲突）。
+    ///
+    ///   ★ 但真正的解法不是换一个固定键，而是**这一项可配置**，并且注册失败时
+    ///     界面要说出来（见 MainWindow 的 SwitchModeHintUnavailable）。没有哪个键
+    ///     在每台电脑上都空着，所以程序必须能回答"这台机器上这个键能不能用"。
+    ///
+    ///   ★ 另有一条完全不碰键盘的路：命令条码（见 ScanCommand）。
+    /// English:
+    ///   Toggles SN/SKU (spec §7). The default is Insert rather than F8.
+    ///
+    ///   The change was paid for on site: F8 is taken by different resident software on different
+    ///   PCs, and "taken on this particular machine" is discovered only after installing. Insert
+    ///   exists on both desktop and laptop keyboards, sits in a fixed place, and is pressed alone by
+    ///   very few programs (Shift+Insert paste is a different combination and does not collide).
+    ///
+    ///   The real answer, though, is not another fixed key but that this is configurable and that
+    ///   the UI says so when registration fails (see MainWindow's SwitchModeHintUnavailable). No key
+    ///   is free on every PC, so the program has to be able to answer whether this one is free here.
+    ///
+    ///   There is also a path that never touches the keyboard: command barcodes (see ScanCommand).
     /// </summary>
-    public string? ToggleMode { get; set; } = "F8";
+    public string? ToggleMode { get; set; } = "Insert";
 
     /// <summary>
     /// 中文：强制发送原始码，默认 F10。仅在有待处理错误时有效（规格 §10）。

@@ -134,7 +134,15 @@ public partial class CompactWindow : Window
             var isSn = snapshot.Mode == ScanMode.Sn;
             StatePanel.Background = (Brush)FindResource(isSn ? "SnBrush" : "SkuBrush");
             StateTitleText.Text = strings[isSn ? "ModeSn" : "ModeSku"];
-            StateSubtitleText.Text = snapshot.LastScanRawCode ?? strings["NoScanYet"];
+            // 小窗里空间只够一行，所以命令条码那一枪显示的是"发生了什么"而不是
+            // 原始码——"（已切到 SKU 模式）"比 "#SH:SKU#" 对工人有用得多，
+            // 而后者他刚刚才扫过，不需要再看一遍。
+            // One line is all the compact window has, so a command barcode shows what happened
+            // rather than the raw code: "(switched to SKU)" is far more use to the operator than
+            // "#SH:SKU#", which they just scanned and do not need read back.
+            StateSubtitleText.Text = snapshot.LastScanNoticeKey is { } noticeKey
+                ? strings[noticeKey]
+                : snapshot.LastScanRawCode ?? strings["NoScanYet"];
         }
 
         PauseButton.Content = strings[snapshot.IsPaused ? "Resume" : "Pause"];

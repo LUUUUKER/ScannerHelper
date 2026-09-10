@@ -176,6 +176,10 @@ public partial class MainWindow : Window
         {
             soundSession.ModeToggled += OnModeToggled;
             soundSession.ErrorRaised += OnErrorSound;
+
+            // 认不出的命令条码只出声，不进待决状态——理由见 ScannerSession.CommandRejected。
+            // An unrecognized command sheet only makes a sound; see ScannerSession.CommandRejected.
+            soundSession.CommandRejected += OnErrorSound;
         }
 
         _refreshTimer = new DispatcherTimer(DispatcherPriority.Background)
@@ -280,6 +284,25 @@ public partial class MainWindow : Window
             return;
         }
 
+        // ★ 配置里的键换了，就得先把旧的还回去再注册新的。
+        //
+        //   不还回去的后果是双重的：旧键**继续被本程序占着**，在别的程序里一直
+        //   失灵（而没有人会把"Insert 不好使了"和这个扫码程序联系起来）；同时
+        //   Register 看见"已经注册过"直接返回 true，新键其实根本没生效，而界面
+        //   会兴高采烈地显示"这台电脑上可用"。
+        // A changed key must be handed back before the new one is taken. Otherwise the old key stays
+        // held by this program and remains dead in every other one — and nobody connects "Insert
+        // stopped working" with the scanner program — while Register sees "already registered",
+        // returns true, and the UI cheerfully reports the new key as available when it was never
+        // taken at all.
+        var configuredChord = CurrentApp.Settings.Hotkeys.ToggleMode ?? "Insert";
+
+        if (!string.Equals(hotkeys.ToggleModeChord, configuredChord, StringComparison.Ordinal))
+        {
+            hotkeys.Unregister(ScannerHotkey.ToggleMode);
+            hotkeys.ToggleModeChord = configuredChord;
+        }
+
         if (snapshot.IsPaused)
         {
             hotkeys.Unregister(ScannerHotkey.ToggleMode);
@@ -300,6 +323,44 @@ public partial class MainWindow : Window
             hotkeys.Unregister(ScannerHotkey.ForceSend);
             hotkeys.Unregister(ScannerHotkey.Discard);
         }
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   试一下某个键在**这台机器上**能不能被本程序拿到。设置界面用它，
+    ///   在人还没离开设置窗口的时候就把答案说出来。
+    ///   输出：拿到了返回 true。
+    ///
+    ///   ★ 必须先把当前那个热键**还回去**再试。热键是全局独占的，本程序自己
+    ///     占着的时候去试同一个键，Windows 一样会拒绝——那会让设置界面把一个
+    ///     好好的键报成"被占用"，而"占用"它的正是提问的人自己。
+    ///
+    ///   ★ 试完不必收拾现场：SyncHotkeys 每次刷新都会拿设置里的值和当前值比，
+    ///     不一样就还回去重注册。所以取消设置之后，键会自己回到原来那个。
+    /// English:
+    ///   Tries whether a key can be taken by this program on this machine, so Settings can answer
+    ///   while the person is still standing in front of it.
+    ///
+    ///   The current hotkey must be handed back first: hotkeys are globally exclusive, and testing
+    ///   the same key while this program holds it is refused just the same — which would report a
+    ///   perfectly good key as taken, by the very process asking the question.
+    ///
+    ///   Nothing needs tidying afterwards: every refresh SyncHotkeys compares the configured value
+    ///   with the current one and re-registers when they differ, so cancelling Settings returns the
+    ///   key to what it was.
+    /// </summary>
+    internal bool ProbeToggleHotkey(string chord)
+    {
+        if (_hotkeys is not { } hotkeys)
+        {
+            return false;
+        }
+
+        hotkeys.Unregister(ScannerHotkey.ToggleMode);
+        hotkeys.ToggleModeChord = chord;
+
+        _isToggleHotkeyAvailable = hotkeys.Register(ScannerHotkey.ToggleMode);
+        return _isToggleHotkeyAvailable;
     }
 
     private static App CurrentApp => (App)Application.Current;
@@ -420,8 +481,9 @@ public partial class MainWindow : Window
             StateHeadingText.Text = strings["ModeHeading"];
             StateTitleText.Text = ModeLabel(snapshot.Mode, strings);
             StateSubtitleText.Text = strings[isSn ? "ModeSnSubtitle" : "ModeSkuSubtitle"];
-            SwitchHintText.Text = strings[
-                _isToggleHotkeyAvailable ? "SwitchModeHint" : "SwitchModeHintUnavailable"];
+            SwitchHintText.Text = Localizer.Format(
+                _isToggleHotkeyAvailable ? "SwitchModeHint" : "SwitchModeHintUnavailable",
+                CurrentApp.Settings.Hotkeys.ToggleMode ?? string.Empty);
         }
 
         // ★ 暂停按钮**永远可点**。它是安全阀（规格 §5.7），而一个会在某些状态下
@@ -438,10 +500,16 @@ public partial class MainWindow : Window
             ? Localizer.Format("ConnectedOn", snapshot.PortName ?? string.Empty)
             : strings["Disconnected"];
 
+        // 命令条码那一枪没有发出去，所以显示的不是"发了什么"而是"发生了什么"。
+        // 见 SessionSnapshot.LastScanNoticeKey。
+        // A command barcode is not sent, so what is shown is what happened rather than what went
+        // out. See SessionSnapshot.LastScanNoticeKey.
         LastScanText.Text = snapshot.LastScanRawCode is { } raw
-            ? snapshot.LastScanEmitted is { } emitted && emitted != raw
-                ? $"{raw}  →  {emitted}"
-                : raw
+            ? snapshot.LastScanNoticeKey is { } noticeKey
+                ? $"{raw}  →  {strings[noticeKey]}"
+                : snapshot.LastScanEmitted is { } emitted && emitted != raw
+                    ? $"{raw}  →  {emitted}"
+                    : raw
             : strings["NoScanYet"];
 
         UpdateLinkWarning(snapshot);

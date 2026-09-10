@@ -108,6 +108,30 @@ internal static class HotkeyNative
 
     /// <summary>
     /// 中文：
+    ///   修饰键。只有模式切换键可以带修饰键（见 GlobalHotkeyListener），
+    ///   因为它是常驻注册的那一个，也就是现场撞上别的软件的那一个——
+    ///   带上 Ctrl+Alt 之后撞车概率几乎归零。
+    ///
+    ///   ★ 修饰键自己不能当那个"键"。RegisterHotKey 要的是「修饰键 + 一个键」，
+    ///     所以"单独用 Alt 切换模式"这个想法在 Windows 上根本不成立。
+    /// English:
+    ///   Modifiers. Only the mode toggle may carry them (see GlobalHotkeyListener), because it is
+    ///   the one held permanently and therefore the one that clashed on site; with Ctrl+Alt in front
+    ///   of it the chance of a clash is essentially zero.
+    ///
+    ///   A modifier cannot itself be the key: RegisterHotKey takes modifiers plus a key, so "use
+    ///   Alt alone to switch modes" is not something Windows can express.
+    /// </summary>
+    internal const uint MOD_ALT = 0x0001;
+
+    /// <inheritdoc cref="MOD_ALT" />
+    internal const uint MOD_CONTROL = 0x0002;
+
+    /// <inheritdoc cref="MOD_ALT" />
+    internal const uint MOD_SHIFT = 0x0004;
+
+    /// <summary>
+    /// 中文：
     ///   注册一个全局热键。
     ///   输出：成功返回 true。失败最常见的原因是**别的程序已经注册了同一个键**，
     ///         那不是异常情形，因此这里返回 false 而不抛。

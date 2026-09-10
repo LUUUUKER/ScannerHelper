@@ -58,6 +58,8 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using ScannerHelper.Win32.Native;
 
+using ScannerHelper.Core.Input;
+
 namespace ScannerHelper.Win32;
 
 /// <summary>
@@ -168,6 +170,98 @@ public sealed class GlobalHotkeyListener : IDisposable
 
     /// <summary>
     /// 中文：
+    ///   模式切换键的配置写法，例如 "Insert"、"Ctrl+Alt+S"（见 HotkeyKeyCatalog）。
+    ///   改了之后要先 Unregister 再 Register 才生效。
+    /// English:
+    ///   How the mode-toggle key is configured, e.g. "Insert" or "Ctrl+Alt+S" (see
+    ///   HotkeyKeyCatalog). Changing it takes effect after an Unregister followed by a Register.
+    /// </summary>
+    public string ToggleModeChord { get; set; } = "Insert";
+
+    /// <summary>
+    /// 中文：
+    ///   键名 → Windows 虚拟键码。Core 只认名字（它不能引用任何 Windows 的东西），
+    ///   这张表是名字落到本平台上的那一步。
+    /// English:
+    ///   Key name to Windows virtual-key code. Core deals only in names, since it may reference
+    ///   nothing from Windows; this table is where a name lands on this platform.
+    /// </summary>
+    private static readonly Dictionary<string, ushort> VirtualKeys =
+        new(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Insert"] = 0x2D,
+            ["Delete"] = 0x2E,
+            ["Home"] = 0x24,
+            ["End"] = 0x23,
+            ["PageUp"] = 0x21,
+            ["PageDown"] = 0x22,
+            ["Pause"] = 0x13,
+            ["ScrollLock"] = 0x91,
+            ["Apps"] = 0x5D,
+            ["NumpadAdd"] = 0x6B,
+            ["NumpadSubtract"] = 0x6D,
+            ["NumpadMultiply"] = 0x6A,
+            ["NumpadDivide"] = 0x6F,
+            ["Escape"] = 0x1B,
+            ["F1"] = 0x70,
+            ["F2"] = 0x71,
+            ["F3"] = 0x72,
+            ["F4"] = 0x73,
+            ["F6"] = 0x75,
+            ["F7"] = 0x76,
+            ["F8"] = 0x77,
+            ["F9"] = 0x78,
+            ["F10"] = 0x79,
+        };
+
+    /// <summary>
+    /// 中文：把配置里的写法解析成 RegisterHotKey 要的两个数。
+    /// English: Resolves the configured text into the two numbers RegisterHotKey needs.
+    /// </summary>
+    private static bool TryResolve(string chordText, out uint modifiers, out ushort virtualKey)
+    {
+        modifiers = HotkeyNative.MOD_NONE;
+        virtualKey = 0;
+
+        if (!HotkeyKeyCatalog.TryParse(chordText, out var chord))
+        {
+            return false;
+        }
+
+        if (!VirtualKeys.TryGetValue(chord.KeyName, out virtualKey))
+        {
+            // 单个字母（"S"）不在表里，按 ASCII 直接得到虚拟键码——
+            // A~Z 的虚拟键码就是它们大写字母的 ASCII 值。
+            // Single letters ("S") are absent from the table: A-Z virtual-key codes are simply the
+            // ASCII values of their uppercase forms.
+            if (chord.KeyName.Length != 1 || !char.IsAsciiLetter(chord.KeyName[0]))
+            {
+                return false;
+            }
+
+            virtualKey = (ushort)char.ToUpperInvariant(chord.KeyName[0]);
+        }
+
+        if (chord.Modifiers.HasFlag(HotkeyModifiers.Alt))
+        {
+            modifiers |= HotkeyNative.MOD_ALT;
+        }
+
+        if (chord.Modifiers.HasFlag(HotkeyModifiers.Control))
+        {
+            modifiers |= HotkeyNative.MOD_CONTROL;
+        }
+
+        if (chord.Modifiers.HasFlag(HotkeyModifiers.Shift))
+        {
+            modifiers |= HotkeyNative.MOD_SHIFT;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// 中文：
     ///   注册一个热键。已经注册过就直接返回 true。
     ///   输出：拿到了返回 true；被别的程序占着返回 false。
     ///
@@ -193,17 +287,45 @@ public sealed class GlobalHotkeyListener : IDisposable
             return true;
         }
 
-        var virtualKey = hotkey switch
+        // ★ 只有切换键是可配置的（见 HotkeySettings.ToggleMode）。
+        //
+        //   强制发送与取消保持 F10 / Esc 不动：它们**只在有一枪卡住等决定的
+        //   那几秒里**被注册，其余时间根本不占用（见 MainWindow 的 SyncHotkeys），
+        //   所以它们撞上别的软件的窗口极窄。切换键不一样——它是常驻的，
+        //   而现场正是常驻的那一个撞上了。
+        //
+        // Only the toggle is configurable (see HotkeySettings.ToggleMode). Force Send and Cancel
+        // stay on F10 and Esc because they are registered only during the few seconds a scan is
+        // waiting on a decision (see MainWindow's SyncHotkeys) and hold nothing the rest of the
+        // time, so their window for clashing is very narrow. The toggle is different: it is held
+        // permanently, and the permanent one is what clashed on site.
+        uint modifiers;
+        ushort virtualKey;
+
+        if (hotkey == ScannerHotkey.ToggleMode)
         {
-            ScannerHotkey.ToggleMode => VirtualKeyF8,
-            ScannerHotkey.ForceSend => VirtualKeyF10,
-            _ => VirtualKeyEscape,
-        };
+            if (!TryResolve(ToggleModeChord, out modifiers, out virtualKey))
+            {
+                // 配置里的键名认不出来。不回退到别的键——见 HotkeyKeyCatalog.TryParse：
+                // 悄悄换一个键会让界面显示的和实际生效的不一致。返回 false，
+                // 界面那句"按 X 切换模式"就会换成"这台机器上不可用"。
+                // The configured name is unrecognized. No fallback to another key — see
+                // HotkeyKeyCatalog.TryParse: substituting silently makes the UI disagree with
+                // reality. Returning false turns the "press X to switch" hint into "unavailable
+                // on this machine".
+                return false;
+            }
+        }
+        else
+        {
+            modifiers = HotkeyNative.MOD_NONE;
+            virtualKey = hotkey == ScannerHotkey.ForceSend ? VirtualKeyF10 : VirtualKeyEscape;
+        }
 
         var registered = HotkeyNative.RegisterHotKey(
             _windowHandle,
             (int)hotkey,
-            HotkeyNative.MOD_NONE | HotkeyNative.MOD_NOREPEAT,
+            modifiers | HotkeyNative.MOD_NOREPEAT,
             virtualKey);
 
         if (registered)

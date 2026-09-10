@@ -44,9 +44,11 @@
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
+using System.Windows.Media;
 using Microsoft.Win32;
 using ScannerHelper.App.Localization;
 using ScannerHelper.Core.Domain;
+using ScannerHelper.Core.Input;
 using ScannerHelper.Core.Parsing;
 using ScannerHelper.Core.Settings;
 using ScannerHelper.Core.Validation;
@@ -130,6 +132,7 @@ public partial class SettingsWindow : Window
 
         RefreshPorts();
         SelectBaud(settings.SerialPort.BaudRate);
+        LoadToggleKey(settings);
 
         var parsing = settings.SkuParsing;
         FixedRuleRadio.IsChecked = parsing.RuleType == SkuParsingRuleType.FixedPosition;
@@ -487,6 +490,89 @@ public partial class SettingsWindow : Window
         }
     }
 
+    /// <summary>
+    /// 中文：
+    ///   填好切换键的下拉框，并把当前那个键的可用性显示出来。
+    ///
+    ///   ★ 配置里的值如果不在清单里（有人手改过 settings.json），也要放进下拉框
+    ///     并选中它。悄悄跳到默认值的话，界面显示的和实际生效的就不是一回事了。
+    /// English:
+    ///   Fills the toggle-key list and shows whether the current key is available.
+    ///
+    ///   A configured value outside the catalog — someone edited settings.json — is added and
+    ///   selected rather than silently replaced by the default, which would make the UI and reality
+    ///   disagree.
+    /// </summary>
+    private void LoadToggleKey(AppSettings settings)
+    {
+        var configured = settings.Hotkeys.ToggleMode ?? HotkeyKeyCatalog.ToggleModeChoices[0];
+
+        ToggleKeyCombo.Items.Clear();
+
+        foreach (var choice in HotkeyKeyCatalog.ToggleModeChoices)
+        {
+            ToggleKeyCombo.Items.Add(choice);
+        }
+
+        if (!HotkeyKeyCatalog.ToggleModeChoices.Contains(configured))
+        {
+            ToggleKeyCombo.Items.Add(configured);
+        }
+
+        ToggleKeyCombo.SelectedItem = configured;
+        ShowToggleKeyStatus(configured);
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   换了键就当场试一次，把结果显示出来。
+    ///
+    ///   ★ 当场试，而不是保存之后再说。RegisterHotKey 的成败是关于**这台机器**
+    ///     的确定答案，而人此刻正站在设置窗口前面——这是唯一一个"发现被占用就
+    ///     能立刻换一个"的时刻。等到保存、关窗、第二天工人按了没反应，那个答案
+    ///     就要绕一大圈才回得来。
+    /// English:
+    ///   Trying the key the moment it changes and showing the result.
+    ///
+    ///   On the spot rather than after saving: whether RegisterHotKey succeeds is a definite answer
+    ///   about this machine, and the person is standing in front of Settings right now — the one
+    ///   moment where finding it taken means picking another immediately. Left until save, close,
+    ///   and an operator pressing nothing the next morning, that answer takes a very long way back.
+    /// </summary>
+    private void OnToggleKeyChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_isLoading || ToggleKeyCombo.SelectedItem is not string chord)
+        {
+            return;
+        }
+
+        ShowToggleKeyStatus(chord);
+    }
+
+    private void ShowToggleKeyStatus(string chord)
+    {
+        var available = Application.Current.MainWindow is MainWindow main
+            && main.ProbeToggleHotkey(chord);
+
+        ToggleKeyStatusText.Text = Localizer.Get(available ? "HotkeyAvailable" : "HotkeyTaken");
+        ToggleKeyStatusText.Foreground = (Brush)FindResource(
+            available ? "MutedTextBrush" : "ErrorBrush");
+    }
+
+    /// <summary>
+    /// 中文：打印那两张模式切换条码（见 CommandSheet）。
+    /// English: Prints the two mode-switch sheets (see CommandSheet).
+    /// </summary>
+    private void OnCommandSheetsClicked(object sender, RoutedEventArgs e)
+    {
+        if (CommandSheet.Open() is { } failure)
+        {
+            MessageBox.Show(
+                this, failure, Localizer.Get("SettingsCommandSheets"),
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private void OnSaveClicked(object sender, RoutedEventArgs e)
     {
         if (BuildParsingSettings() is not { } parsing)
@@ -519,6 +605,11 @@ public partial class SettingsWindow : Window
         {
             log.IsMaskingEnabled = settings.Diagnostics.MaskBarcodeData;
             log.RetentionDays = settings.Diagnostics.LogRetentionDays;
+        }
+
+        if (ToggleKeyCombo.SelectedItem is string toggleKey)
+        {
+            settings.Hotkeys.ToggleMode = toggleKey;
         }
 
         settings.ModeSwitchSoundEnabled = ModeSoundCheck.IsChecked == true;
