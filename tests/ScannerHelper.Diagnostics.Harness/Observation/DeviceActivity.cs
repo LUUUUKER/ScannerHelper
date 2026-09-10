@@ -83,7 +83,24 @@ public sealed class DeviceActivity
     /// </summary>
     private const int MaximumRetainedSamples = 20_000;
 
-    private readonly List<long> _keyDownTimestamps = [];
+    /// <summary>
+    /// 中文：本设备的全部按键记录，含弹起。
+    ///
+    ///       之前只存按下的时间戳，够算间隔，却不够**把扫描内容还原出来**——
+    ///       还原需要 Shift 的按下与弹起来维护大小写状态。而"钩子看到的码是否
+    ///       完整"正是当下最要紧的问题，所以这里改成留全量。
+    /// English:
+    ///   Every keystroke recorded for this device, key-ups included.
+    ///
+    ///   Storing only key-down timestamps sufficed for intervals but not for
+    ///   reconstructing the scan text, which needs Shift downs and ups to track case.
+    ///   Whether the hook saw a complete code is the pressing question, so the full
+    ///   stream is retained.
+    /// </summary>
+    private readonly List<RecordedKey> _keys = [];
+
+    private int _keyDownCount;
+    private int _outOfOrderCount;
 
     /// <summary>
     /// 中文：
@@ -119,10 +136,35 @@ public sealed class DeviceActivity
     public int TotalEventCount { get; private set; }
 
     /// <summary>
-    /// 中文：按下事件数，即字符数。
-    /// English: Key-down events, that is, characters.
+    /// 中文：按下事件数。注意含修饰键，因此不等于还原出的字符数——一个大写
+    ///       字母是两次按下（Shift 加字母）换一个字符。
+    /// English: Key-down events. Modifiers included, so this is not the number of
+    ///          reconstructed characters: an uppercase letter is two key-downs, Shift
+    ///          plus the letter, for one character.
     /// </summary>
-    public int KeyDownCount => _keyDownTimestamps.Count;
+    public int KeyDownCount => _keyDownCount;
+
+    /// <summary>
+    /// 中文：时间戳出现倒退的次数。
+    ///
+    ///       ★ 正常情况下恒为零。不为零说明**配对配错了**——某个事件被安到了
+    ///         错误的设备上，或者跟一个很久以前的事件配成了对。第二轮实测中
+    ///         PS/2 键盘的"最小段内间隔"报出负 24 秒，就是这么来的。
+    ///
+    ///         这个数字必须被看见而不是被吸收进统计。规格 §19.1 的原则同样适用：
+    ///         程序绝不能显示一个自己没验证过的状态——一份掺着错配数据的分布，
+    ///         看起来和真的一模一样。
+    /// English:
+    ///   How many times a timestamp went backwards. Always zero when things are right; a
+    ///   non-zero value means mis-pairing — an event attributed to the wrong device, or
+    ///   paired with one from long ago. The second measurement run reported a minimum
+    ///   within-burst interval of minus 24 seconds for exactly this reason.
+    ///
+    ///   The count must be visible rather than absorbed into the statistics. Spec §19.1's
+    ///   principle applies: never display a state that has not been verified, and a
+    ///   distribution containing mis-paired data looks exactly like a sound one.
+    /// </summary>
+    public int OutOfOrderCount => _outOfOrderCount;
 
     /// <summary>
     /// 中文：显示用的名字：有友好名就用友好名，否则退回设备路径的末段，
@@ -166,29 +208,85 @@ public sealed class DeviceActivity
     /// <summary>
     /// 中文：
     ///   记录一个事件。
-    ///   输入：timestamp 事件时间戳；isKeyUp 是否为弹起。
+    ///   输入：timestamp 钩子那一侧的时间戳；virtualKey 虚拟键码；
+    ///         isKeyUp 是否为弹起。
     ///   输出：无。
-    ///   弹起只计入总数；按下额外保留时间戳用于间隔统计。
+    ///   步骤：
+    ///     1. 时间戳早于上一条时计入乱序计数——那说明配对出了问题，
+    ///        但**照常记录**，不丢弃；
+    ///     2. 超出保留上限时丢弃最旧的一条；
+    ///     3. 追加。
+    ///
+    ///   步骤 1 只计数、不丢弃，是因为丢弃会掩盖问题：统计看起来会变正常，
+    ///   而错配依然存在。计数让它留在明面上（规格 §19.1 的同一条原则）。
     /// English:
-    ///   Records one event. Key-ups only increment the total; key-downs additionally
-    ///   retain their timestamp for interval statistics.
+    ///   Records one event.
+    ///   Steps: (1) count a timestamp earlier than the previous one as out-of-order —
+    ///   evidence of a pairing problem — while still recording it; (2) drop the oldest
+    ///   past the retention cap; (3) append.
+    ///
+    ///   Step 1 counts without discarding, because discarding would hide the problem:
+    ///   the statistics would look healthy while the mis-pairing persisted. Counting
+    ///   keeps it in plain sight — spec §19.1's principle again.
     /// </summary>
-    public void Record(long timestamp, bool isKeyUp)
+    public void Record(long timestamp, ushort virtualKey, bool isKeyUp)
     {
         TotalEventCount++;
 
-        if (isKeyUp)
+        // 步骤 1 / Step 1
+        if (_keys.Count > 0 && timestamp < _keys[^1].Timestamp)
         {
-            return;
+            _outOfOrderCount++;
         }
 
-        if (_keyDownTimestamps.Count >= MaximumRetainedSamples)
+        // 步骤 2 / Step 2
+        if (_keys.Count >= MaximumRetainedSamples)
         {
-            _keyDownTimestamps.RemoveAt(0);
+            if (!_keys[0].IsKeyUp)
+            {
+                _keyDownCount--;
+            }
+
+            _keys.RemoveAt(0);
         }
 
-        _keyDownTimestamps.Add(timestamp);
+        // 步骤 3 / Step 3
+        _keys.Add(new RecordedKey(timestamp, virtualKey, isKeyUp));
+
+        if (!isKeyUp)
+        {
+            _keyDownCount++;
+        }
     }
+
+    /// <summary>
+    /// 中文：
+    ///   把本设备的事件流还原成一段一段的扫描内容。
+    ///
+    ///   ★ 这是当下最要紧的对照材料：把这里还原出来的内容，跟应用（记事本、
+    ///     业务网页）里实际收到的内容逐条比对。
+    ///
+    ///       两边都完整   → 那次扫描没问题
+    ///       这边完整、应用那边残缺
+    ///                    → 字符丢在**钩子之后**。我们的架构能修好它：吞掉原始
+    ///                      按键，自己按可控节奏重发。
+    ///       这边也残缺   → 字符丢在**钩子之前**，我们会捕获到一个错码再原样
+    ///                      发出去，而界面显示一切正常。这是规格 §19.1 的
+    ///                      "静默的错误数据"，4b 的硬性关卡必须拦下。
+    /// English:
+    ///   Reconstructs this device's event stream into individual scans.
+    ///
+    ///   This is the comparison that matters right now: match each reconstruction against
+    ///   what the application actually received. Both complete means that scan was fine.
+    ///   Complete here but damaged in the application means characters are lost *after*
+    ///   the hook, which this architecture repairs by swallowing the raw keystrokes and
+    ///   re-emitting at a controlled pace. Damaged here too means they are lost *before*
+    ///   the hook, so we would capture a wrong code and emit it while reporting success —
+    ///   spec §19.1's silently wrong data, which 4b's hard gate must catch.
+    /// </summary>
+    public IReadOnlyList<ReconstructedScan> BuildReconstructedScans()
+        => ScanTextReconstruction.Split(
+            _keys, (long)(BurstGap.TotalSeconds * Stopwatch.Frequency));
 
     /// <summary>
     /// 中文：
@@ -222,15 +320,31 @@ public sealed class DeviceActivity
     public IntervalStatistics BuildIntervalStatistics()
     {
         var burstGapTicks = (long)(BurstGap.TotalSeconds * Stopwatch.Frequency);
+        var keyDownTimestamps = _keys
+            .Where(key => !key.IsKeyUp)
+            .Select(key => key.Timestamp)
+            .ToArray();
 
         var withinBurstIntervals = new List<double>();
-        var burstCount = _keyDownTimestamps.Count > 0 ? 1 : 0;
-        var currentBurstSize = _keyDownTimestamps.Count > 0 ? 1 : 0;
+        var burstCount = keyDownTimestamps.Length > 0 ? 1 : 0;
+        var currentBurstSize = keyDownTimestamps.Length > 0 ? 1 : 0;
         var largestBurstSize = currentBurstSize;
 
-        for (var index = 1; index < _keyDownTimestamps.Count; index++)
+        for (var index = 1; index < keyDownTimestamps.Length; index++)
         {
-            var elapsedTicks = _keyDownTimestamps[index] - _keyDownTimestamps[index - 1];
+            var elapsedTicks = keyDownTimestamps[index] - keyDownTimestamps[index - 1];
+
+            // 负间隔说明时间戳倒退了，那是配对错误的产物，不是输入的性质。
+            // 把它算进分布会污染整份统计，因此排除——它已经被 OutOfOrderCount
+            // 单独计数，不会被藏起来。
+            // A negative interval means the timestamp went backwards, which is an
+            // artifact of mis-pairing rather than a property of the input. Including it
+            // would poison the distribution, so it is excluded — and it is not hidden,
+            // being counted separately in OutOfOrderCount.
+            if (elapsedTicks < 0)
+            {
+                continue;
+            }
 
             if (elapsedTicks > burstGapTicks)
             {

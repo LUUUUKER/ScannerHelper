@@ -57,6 +57,7 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
 using System.IO;
+using System.Text;
 using System.Windows;
 using System.Windows.Media;
 using System.Windows.Threading;
@@ -80,6 +81,14 @@ public partial class MainWindow : Window
     /// </summary>
     private const int MaximumLogRows = 2000;
 
+    /// <summary>
+    /// 中文：统计每隔几个 tick 重算一次。tick 是 100 毫秒，5 次即约半秒——
+    ///       对人来说仍然是"实时"，而重算量降到五分之一。
+    /// English: How many 100 ms ticks between statistics recomputes. Five is about half a
+    ///          second, still live to a person, at a fifth of the work.
+    /// </summary>
+    private const int StatisticsRefreshEveryNTicks = 5;
+
     private readonly ObservationSession _session = new();
     private readonly ObservableCollection<EventLogRow> _logRows = [];
     private readonly ObservableCollection<DeviceRow> _deviceRows = [];
@@ -97,6 +106,8 @@ public partial class MainWindow : Window
     private long? _firstTimestamp;
 
     private long _sequenceNumber;
+
+    private int _ticksSinceStatisticsRefresh;
 
     /// <summary>
     /// 中文：构造窗口并接上数据源。
@@ -176,6 +187,26 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnRefreshDevicesClicked(object sender, RoutedEventArgs e) => RefreshDeviceList();
 
+    /// <summary>
+    /// 中文：
+    ///   定时排空缓冲区并刷新界面。
+    ///
+    ///   日志每次都追加，统计则每 <see cref="StatisticsRefreshEveryNTicks"/> 次才重算
+    ///   一遍。重算要把每台设备的全部事件重新还原成文本，样本攒到上万条之后
+    ///   每 100 毫秒做一次是纯粹的浪费。
+    ///
+    ///   这里已经不会影响测量精度了——捕获跑在专用线程上，界面再慢也拖不到它。
+    ///   降频纯粹是为了让工具本身用起来不卡。
+    /// English:
+    ///   Drains and refreshes on a timer. The log appends every tick while the statistics
+    ///   recompute every Nth, since recomputing reconstructs every device's full event
+    ///   stream into text — wasteful at 100 ms intervals once samples reach the
+    ///   thousands.
+    ///
+    ///   This no longer affects measurement accuracy: capture runs on its own thread and
+    ///   no amount of UI slowness reaches it. The throttle exists purely so the tool
+    ///   itself stays responsive.
+    /// </summary>
     private void OnDrainTick(object? sender, EventArgs e)
     {
         var drained = _session.Drain();
@@ -184,15 +215,24 @@ public partial class MainWindow : Window
             AppendLogRow(observedEvent);
         }
 
-        if (drained.Count > 0)
+        if (drained.Count == 0)
         {
-            RefreshStatistics();
-
-            if (AutoScrollCheckBox.IsChecked == true && _logRows.Count > 0)
-            {
-                EventListView.ScrollIntoView(_logRows[^1]);
-            }
+            return;
         }
+
+        if (AutoScrollCheckBox.IsChecked == true && _logRows.Count > 0)
+        {
+            EventListView.ScrollIntoView(_logRows[^1]);
+        }
+
+        _ticksSinceStatisticsRefresh++;
+        if (_ticksSinceStatisticsRefresh < StatisticsRefreshEveryNTicks)
+        {
+            return;
+        }
+
+        _ticksSinceStatisticsRefresh = 0;
+        RefreshStatistics();
     }
 
     /// <summary>
@@ -324,13 +364,39 @@ public partial class MainWindow : Window
         RefreshDeviceStatistics();
     }
 
+    /// <summary>
+    /// 中文：
+    ///   刷新设备表，并把"钩子看到的扫描内容"呈现出来。
+    ///
+    ///   ★ 「内容种类」这一列是当下最该盯的数字。同一个条码扫五十次，这里应当
+    ///     恒为 1。一旦大于 1，说明**钩子这一侧收到的就已经不是同一个码**——
+    ///     字符丢在扫码枪到 Windows 这一段，而不是丢在下游。
+    ///
+    ///     这个区别决定产品能不能救：丢在下游，我们吞掉重发就修好了；丢在上游，
+    ///     我们只会把错码原样发进业务系统，界面还显示成功（规格 §19.1）。
+    /// English:
+    ///   Refreshes the device table and surfaces what the hook saw.
+    ///
+    ///   The "distinct" column is the number to watch. Fifty scans of one barcode should
+    ///   hold it at 1. Above 1 means the hook side already received something other than
+    ///   the same code — characters lost between the scanner and Windows rather than
+    ///   downstream.
+    ///
+    ///   That distinction decides whether the product can help at all: lost downstream,
+    ///   swallowing and re-emitting fixes it; lost upstream, we would emit the wrong code
+    ///   and report success (spec §19.1).
+    /// </summary>
     private void RefreshDeviceStatistics()
     {
         _deviceRows.Clear();
+        var reconstruction = new StringBuilder();
 
         foreach (var device in _session.Devices.OrderByDescending(item => item.KeyDownCount))
         {
             var statistics = device.BuildIntervalStatistics();
+            var scans = device.BuildReconstructedScans();
+            var distinctScans = scans.Select(scan => scan.Text).Distinct().Count();
+
             _deviceRows.Add(new DeviceRow(
                 Name: device.DisplayName,
                 VendorProduct: device.VendorProduct,
@@ -339,8 +405,44 @@ public partial class MainWindow : Window
                 LargestBurst: statistics.LargestBurstSize.ToString(CultureInfo.InvariantCulture),
                 MedianInterval: statistics.MedianMilliseconds is { } median
                     ? median.ToString("0.00", CultureInfo.InvariantCulture)
-                    : "—"));
+                    : "—",
+                DistinctScans: scans.Count == 0
+                    ? "—"
+                    : distinctScans > 1
+                        ? $"⚠ {distinctScans}"
+                        : distinctScans.ToString(CultureInfo.InvariantCulture)));
+
+            if (scans.Count == 0)
+            {
+                continue;
+            }
+
+            reconstruction.AppendLine($"{device.DisplayName}  （共 {scans.Count} 次）");
+
+            foreach (var scan in scans.TakeLast(5))
+            {
+                var terminator = scan.EndedWithEnter ? "⏎" : "· 无回车";
+                reconstruction.AppendLine($"  {scan.Text}  {terminator}");
+            }
+
+            if (distinctScans > 1)
+            {
+                reconstruction.AppendLine(
+                    $"  ⚠ 还原出 {distinctScans} 种不同内容——钩子这一侧收到的就已经不一致");
+            }
+
+            reconstruction.AppendLine();
         }
+
+        var hasInconsistency = _deviceRows.Any(row => row.DistinctScans.StartsWith('⚠'));
+
+        ReconstructionText.Text = reconstruction.Length == 0
+            ? "—"
+            : reconstruction.ToString().TrimEnd();
+
+        ReconstructionBorder.Background = hasInconsistency
+            ? new SolidColorBrush(Color.FromRgb(0xFD, 0xEC, 0xEA))
+            : new SolidColorBrush(Color.FromRgb(0xF6, 0xF6, 0xF6));
     }
 
     /// <summary>
@@ -372,7 +474,8 @@ public partial class MainWindow : Window
                 Characters: "—",
                 Bursts: "—",
                 LargestBurst: "—",
-                MedianInterval: "—"));
+                MedianInterval: "—",
+                DistinctScans: "—"));
         }
     }
 
@@ -502,4 +605,5 @@ public sealed record DeviceRow(
     string Characters,
     string Bursts,
     string LargestBurst,
-    string MedianInterval);
+    string MedianInterval,
+    string DistinctScans);

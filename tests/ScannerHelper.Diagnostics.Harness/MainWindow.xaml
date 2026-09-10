@@ -123,6 +123,14 @@
                                FontSize="12" TextWrapping="Wrap" Text="—" />
                 </Border>
 
+                <TextBlock DockPanel.Dock="Top" Text="钩子看到的最近几次扫描 / Recent scans as the hook saw them"
+                           Style="{StaticResource SectionHeader}" />
+                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" x:Name="ReconstructionBorder"
+                        Background="#F6F6F6">
+                    <TextBlock x:Name="ReconstructionText" FontFamily="Consolas, Courier New, monospace"
+                               FontSize="12" TextWrapping="Wrap" Text="—" />
+                </Border>
+
                 <TextBlock DockPanel.Dock="Top" Text="设备 / Devices"
                            Style="{StaticResource SectionHeader}" />
 
@@ -139,8 +147,10 @@
                                             DisplayMemberBinding="{Binding Bursts}" />
                             <GridViewColumn Header="最大段 / Max" Width="62"
                                             DisplayMemberBinding="{Binding LargestBurst}" />
-                            <GridViewColumn Header="中位间隔 / Median ms" Width="120"
+                            <GridViewColumn Header="中位间隔 / ms" Width="86"
                                             DisplayMemberBinding="{Binding MedianInterval}" />
+                            <GridViewColumn Header="内容种类 / Distinct" Width="96"
+                                            DisplayMemberBinding="{Binding DistinctScans}" />
                         </GridView>
                     </ListView.View>
                 </ListView>

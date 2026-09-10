@@ -46,6 +46,7 @@
 
 using System.Globalization;
 using System.Text;
+using ScannerHelper.Win32.Observation;
 
 namespace ScannerHelper.Diagnostics.Harness.Observation;
 
@@ -92,6 +93,7 @@ public static class MeasurementReport
         AppendVirtualKeyDisagreement(report, session);
         AppendDelta(report, deltas);
         AppendDevices(report, session);
+        AppendReconstructedScans(report, session);
         AppendAttachedKeyboards(report, session);
         AppendOperatorNotes(report, operatorNotes);
         AppendOpenQuestions(report);
@@ -150,13 +152,84 @@ public static class MeasurementReport
                 + "分布中间存在缺口，尾部百分位尤其不可信。");
             report.AppendLine(
                 "- 未配对事件不为零：说明某一条通道看到了另一条完全没看到的按键。"
-                + "**这本身可能是比时序更重要的发现**，不要当作噪声略过——"
-                + "先查清楚是哪一类按键，再决定这批数据还能不能用。");
+                + "**这本身可能是比时序更重要的发现**，不要当作噪声略过。下面的明细"
+                + "给出了具体是哪一类按键。");
             report.AppendLine();
             report.AppendLine(
                 "⚠️ **This run is incomplete and the statistics below are not complete evidence.**");
         }
 
+        report.AppendLine();
+
+        AppendUnmatchedBreakdown(report, session);
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   未配对事件的分类明细。
+    ///
+    ///   ★ 只给总数是没法行动的。"有 40 个事件没配上"什么都说明不了；
+    ///     "这 40 个都是扫描码 0x1F 的按下、只出现在 Raw Input 一侧"才指向原因。
+    ///
+    ///   两个方向的含义完全不同，必须分开读：
+    ///     只有 Raw Input 看到 → 钩子那次被跳过了。规格 §19.1 的
+    ///                           LowLevelHooksTimeout 就是干这个的：回调一旦超时，
+    ///                           Windows 跳过它、通常还把钩子摘掉，且不发通知。
+    ///                           **这对 4b 是要命的**——被跳过的那次按键不会被吞掉，
+    ///                           原始字符直接进入业务软件，同时我们的缓冲区里少了它。
+    ///     只有钩子看到       → 合成事件（本工具已排除），或者某类输入根本不经过
+    ///                           Raw Input。
+    /// English:
+    ///   The breakdown of unpaired events.
+    ///
+    ///   A bare total is not actionable: "40 unpaired" says nothing, while "all 40 were
+    ///   scan code 0x1F key-downs seen only by Raw Input" points at a cause.
+    ///
+    ///   The two directions mean entirely different things. Raw-Input-only means the hook
+    ///   was skipped for that event — spec §19.1's LowLevelHooksTimeout does exactly
+    ///   that, and it is serious for 4b, since a skipped keystroke is not swallowed: the
+    ///   raw character reaches the business application while our buffer is missing it.
+    ///   Hook-only means a synthesized event (already excluded here) or some input that
+    ///   bypasses Raw Input.
+    /// </summary>
+    private static void AppendUnmatchedBreakdown(StringBuilder report, ObservationSession session)
+    {
+        var breakdown = session.Pairing.UnmatchedBreakdown;
+        if (breakdown.Count == 0)
+        {
+            return;
+        }
+
+        report.AppendLine("### 0.1 未配对事件明细 / Unpaired event breakdown");
+        report.AppendLine();
+        report.AppendLine("| 只出现在 / Seen only by | 扫描码 / Scan | 虚拟键 / VK | 方向 / Dir | 次数 / Count |");
+        report.AppendLine("|---|---|---|---|---|");
+
+        foreach (var (kind, count) in breakdown.Take(20))
+        {
+            var channel = kind.Channel == InputChannel.Hook ? "钩子 / Hook" : "Raw Input";
+            report.AppendLine(
+                $"| {channel} | `0x{kind.ScanCode:X2}` | `0x{kind.VirtualKey:X2}` "
+                + $"{DescribeVirtualKey(kind.VirtualKey)} | {(kind.IsKeyUp ? "up" : "down")} | {count} |");
+        }
+
+        report.AppendLine();
+        report.AppendLine(
+            "**只有 Raw Input 看到** 意味着那一次钩子被跳过了。规格 §19.1 描述的"
+            + "`LowLevelHooksTimeout` 正是这个机制：回调超时一次，Windows 就跳过它、"
+            + "通常还把钩子摘掉，且不发任何通知。");
+        report.AppendLine();
+        report.AppendLine(
+            "⚠️ **这对 Task 4b 是要命的。** 被跳过的那次按键不会被吞掉——原始字符"
+            + "直接进入业务软件，同时我们自己的缓冲区里也少了它。结果是网页里多出"
+            + "一个不该有的字符，而我们发出去的码少一个字符，两头都错，界面却显示"
+            + "一切正常。若这个比例在试点机器上仍然显著，4b 的硬性关卡就该拦下。");
+        report.AppendLine();
+        report.AppendLine(
+            "Raw-Input-only means the hook was skipped for that event. In 4b that keystroke "
+            + "would not be swallowed: the raw character reaches the business application "
+            + "while our own buffer is missing it — wrong in both directions, with the UI "
+            + "reporting success.");
         report.AppendLine();
     }
 
@@ -430,22 +503,41 @@ public static class MeasurementReport
         }
 
         report.AppendLine(
-            "| 设备 / Device | VID/PID | 字符数 / Chars | 连发段 / Bursts | 最大段 / Largest "
-            + "| 段内间隔最小 / Min (ms) | 中位 / Median | p99 | 最大 / Max |");
-        report.AppendLine("|---|---|---|---|---|---|---|---|---|");
+            "| 设备 / Device | VID/PID | 按下 / Downs | 连发段 / Bursts | 最大段 / Largest "
+            + "| 段内间隔最小 / Min (ms) | 中位 / Median | p99 | 最大 / Max | 乱序 / OoO |");
+        report.AppendLine("|---|---|---|---|---|---|---|---|---|---|");
+
+        var anyOutOfOrder = false;
 
         foreach (var device in session.Devices.OrderByDescending(item => item.KeyDownCount))
         {
             var statistics = device.BuildIntervalStatistics();
+            anyOutOfOrder |= device.OutOfOrderCount > 0;
+
             report.AppendLine(
                 $"| {device.DisplayName} | {device.VendorProduct} | {device.KeyDownCount} "
                 + $"| {statistics.BurstCount} | {statistics.LargestBurstSize} "
                 + $"| {Format(statistics.MinimumMilliseconds)} "
                 + $"| {Format(statistics.MedianMilliseconds)} "
                 + $"| {Format(statistics.NinetyNinthMilliseconds)} "
-                + $"| {Format(statistics.MaximumMilliseconds)} |");
+                + $"| {Format(statistics.MaximumMilliseconds)} "
+                + $"| {device.OutOfOrderCount} |");
         }
 
+        report.AppendLine();
+
+        if (anyOutOfOrder)
+        {
+            report.AppendLine(
+                "⚠️ **「乱序」不为零，说明存在配错对的事件**——时间戳出现了倒退。"
+                + "本表的间隔统计已经把负间隔排除在外，但既然配对本身出过错，"
+                + "整表的可信度都要打折扣。先弄清未配对是怎么来的，再采信这些数字。");
+            report.AppendLine();
+        }
+
+        report.AppendLine(
+            "「按下」含修饰键，因此与还原出的字符数对不上是正常的：一个大写字母是"
+            + "两次按下（Shift 加字母）换一个字符。真正的扫描内容见第 5 节。");
         report.AppendLine();
         report.AppendLine(
             $"「连发段」按大于 {DeviceActivity.BurstGap.TotalMilliseconds:0} 毫秒的空隙切分，"
@@ -479,6 +571,130 @@ public static class MeasurementReport
     }
 
     /// <summary>
+    /// 中文：
+    ///   从钩子的事件流里还原出来的扫描内容。
+    ///
+    ///   ★ 这是当下最重要的一节。它回答的是：**字符究竟丢在钩子之前还是之后？**
+    ///
+    ///     用法：把这里列出的内容，与应用（记事本、业务网页）里实际收到的内容
+    ///     **逐条比对**。
+    ///
+    ///       两边都完整       这次扫描没问题
+    ///       这边完整、应用残缺
+    ///                        丢在**钩子之后**。我们的架构恰好能修好它：原始按键
+    ///                        全部吞掉，自己用 SendInput 按可控节奏重发。
+    ///       这边也残缺       丢在**钩子之前**。我们会捕获到一个残缺的码再原样
+    ///                        发出去，而界面显示一切正常——规格 §19.1 的"静默的
+    ///                        错误数据"，4b 的硬性关卡必须拦下。
+    ///
+    ///     这个问题没法靠推理，只能靠对照。
+    /// English:
+    ///   The scans reconstructed from the hook's event stream — the most important
+    ///   section right now, because it answers whether characters are lost before the
+    ///   hook or after it.
+    ///
+    ///   Compare each entry against what the application actually received. Complete in
+    ///   both places means the scan was fine. Complete here but damaged in the
+    ///   application means loss *after* the hook, which this architecture repairs by
+    ///   swallowing the raw keystrokes and re-emitting at a controlled pace. Damaged here
+    ///   too means loss *before* the hook: we would capture a wrong code and emit it while
+    ///   reporting success — spec §19.1's silently wrong data, which 4b's hard gate must
+    ///   catch. Reasoning cannot settle this; only the comparison can.
+    /// </summary>
+    private static void AppendReconstructedScans(StringBuilder report, ObservationSession session)
+    {
+        report.AppendLine("## 5. 钩子看到的扫描内容 / Scans as the hook saw them");
+        report.AppendLine();
+        report.AppendLine(
+            "**用法**：把下面的内容与应用里实际收到的内容逐条比对。");
+        report.AppendLine();
+        report.AppendLine("| 对照结果 / Comparison | 含义 / Meaning |");
+        report.AppendLine("|---|---|");
+        report.AppendLine("| 两边都完整 | 那次扫描没问题 |");
+        report.AppendLine(
+            "| 这边完整、应用残缺 | 丢在**钩子之后**。本产品的架构恰好能修好它——"
+            + "原始按键全部吞掉，自己按可控节奏重发 |");
+        report.AppendLine(
+            "| 这边也残缺 | 丢在**钩子之前**。我们会捕获残缺的码再原样发出，"
+            + "而界面显示正常。规格 §19.1 的静默错误数据，4b 硬性关卡必须拦下 |");
+        report.AppendLine();
+
+        if (session.Devices.Count == 0)
+        {
+            report.AppendLine("本次没有可还原的扫描。 Nothing to reconstruct.");
+            report.AppendLine();
+            return;
+        }
+
+        foreach (var device in session.Devices.OrderByDescending(item => item.KeyDownCount))
+        {
+            var scans = device.BuildReconstructedScans();
+            if (scans.Count == 0)
+            {
+                continue;
+            }
+
+            report.AppendLine($"### {device.DisplayName}");
+            report.AppendLine();
+
+            // 相同的内容合并计数：扫同一个条码五十次，逐条列出五十行没有意义，
+            // 而"这个内容出现了 47 次、那三个各出现一次"一眼就能看出哪些是异常。
+            // Identical texts are grouped: fifty rows for fifty scans of one barcode say
+            // nothing, whereas "this one 47 times, these three once each" shows at a
+            // glance which are the anomalies.
+            var grouped = scans
+                .GroupBy(scan => (scan.Text, scan.EndedWithEnter))
+                .Select(group => (group.Key.Text, group.Key.EndedWithEnter, Count: group.Count()))
+                .OrderByDescending(entry => entry.Count)
+                .ToArray();
+
+            report.AppendLine("| 次数 / Count | 长度 / Len | 以回车结束 / Enter | 内容 / Text |");
+            report.AppendLine("|---|---|---|---|");
+
+            foreach (var (text, endedWithEnter, count) in grouped)
+            {
+                report.AppendLine(
+                    $"| {count} | {text.Length} | {(endedWithEnter ? "是 / yes" : "**否 / no**")} "
+                    + $"| `{text}` |");
+            }
+
+            report.AppendLine();
+
+            var distinctCount = grouped.Length;
+            if (distinctCount > 1)
+            {
+                report.AppendLine(
+                    $"⚠️ 本设备出现了 **{distinctCount} 种**不同的内容。若实际只扫了同一个"
+                    + "条码，那么**钩子这一侧本身就已经收到了残缺的数据**——问题出在"
+                    + "扫码枪到 Windows 这一段，不是出在下游。");
+                report.AppendLine();
+                report.AppendLine(
+                    "这种情况下，本产品的吞掉-重发架构**修不好它**，反而会把错码"
+                    + "原样发进业务系统，界面还显示成功。可行的方向有两个：");
+                report.AppendLine();
+                report.AppendLine(
+                    "1. **调扫码枪的字符间隔（inter-character delay）。** 多数 HID 扫码枪"
+                    + "都能用配置条码把这个值调大（例如从 0 调到 5~10 毫秒）。"
+                    + "本报告第 4 节里的段内间隔中位数就是当前值的实测结果——"
+                    + "若只有 1 毫秒出头，那基本可以确定是发得太快。");
+                report.AppendLine(
+                    "2. **在 SKU 模式下用校验规则兜底。** 长度与字符集校验能拦下"
+                    + "大部分截断（规格 §9），但**拦不住 SN 模式**——SN 原样输出，"
+                    + "没有任何校验层。这一点必须让仓库知道。");
+                report.AppendLine();
+            }
+        }
+
+        report.AppendLine(
+            "> 还原用的是**美式键盘布局的固定映射**，且假定 CapsLock 处于关闭状态。"
+            + "仓库条码是 ASCII 字母数字，这个映射够用；若还原结果整体大小写颠倒，"
+            + "那说明 CapsLock 开着，本身也是一条值得记下的观察。无法映射的键会显示"
+            + "成 `<0x..>` 占位而不是被跳过——跳过会让残缺的还原结果看起来像一个"
+            + "干净的短字符串，与真的少了字符无法区分。");
+        report.AppendLine();
+    }
+
+    /// <summary>
     /// 中文：第 4、6 问 —— 当前连接的键盘设备清单。
     ///
     ///   重新插拔或重启之后再导出一份，对比设备路径是否一致，就回答了第 4 问；
@@ -490,7 +706,7 @@ public static class MeasurementReport
     /// </summary>
     private static void AppendAttachedKeyboards(StringBuilder report, ObservationSession session)
     {
-        report.AppendLine("## 5. 当前连接的键盘类设备 / Attached keyboard-class devices");
+        report.AppendLine("## 6. 当前连接的键盘类设备 / Attached keyboard-class devices");
         report.AppendLine();
         report.AppendLine(
             "**用法**：重新插拔扫码枪、以及重启机器之后，各导出一份报告，"
@@ -538,7 +754,7 @@ public static class MeasurementReport
     /// </summary>
     private static void AppendOperatorNotes(StringBuilder report, string? operatorNotes)
     {
-        report.AppendLine("## 6. 人工观察记录 / Operator notes");
+        report.AppendLine("## 7. 人工观察记录 / Operator notes");
         report.AppendLine();
 
         if (string.IsNullOrWhiteSpace(operatorNotes))
@@ -568,14 +784,19 @@ public static class MeasurementReport
     /// </summary>
     private static void AppendOpenQuestions(StringBuilder report)
     {
-        report.AppendLine("## 7. 仍未回答 / Still open");
+        report.AppendLine("## 8. 仍未回答 / Still open");
         report.AppendLine();
         report.AppendLine(
             "- **这些数字尚未在试点机器上复现。** 事件时序是机器的性质，不是代码的"
             + "性质；开发机与现场机不是同一台硬件。在现场机器上重跑一轮之前，"
             + "本报告的每一个数字都只是暂定值。");
         report.AppendLine(
-            "- **设备身份跨重启是否稳定**，需要重启后再导出一份报告对比第 5 节。");
+            "- **原始扫描本身有多可靠。** 若第 5 节显示同一个条码还原出多种内容，"
+            + "说明扫码枪到 Windows 这一段就已经在丢字符。必须先用「**完全关掉本工具**"
+            + "再扫五十次」确认这个现象与本工具无关，然后才谈得上继续。"
+            + "本工具装的低层钩子确实坐在输入路径上。");
+        report.AppendLine(
+            "- **设备身份跨重启是否稳定**，需要重启后再导出一份报告对比第 6 节。");
         report.AppendLine(
             "- **同一台物理设备是否会被枚举成多个 Raw Input 设备。** 第 5 节里出现"
             + "`HID#ConvertedDevice` 这类条目时尤其要注意——那是 Windows 为 PS/2 设备"

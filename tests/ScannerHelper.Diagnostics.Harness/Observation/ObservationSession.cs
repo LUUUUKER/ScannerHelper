@@ -265,7 +265,8 @@ public sealed class ObservationSession : IDisposable
                 _devices[completedPair.DeviceHandle] = activity;
             }
 
-            activity.Record(completedPair.HookTimestamp, completedPair.IsKeyUp);
+            activity.Record(
+                completedPair.HookTimestamp, completedPair.HookVirtualKey, completedPair.IsKeyUp);
         }
 
         // 步骤 4 / Step 4
