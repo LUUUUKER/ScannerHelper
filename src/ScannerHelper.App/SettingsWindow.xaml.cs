@@ -71,6 +71,14 @@ public partial class SettingsWindow : Window
     private readonly UiLanguage _languageOnOpen;
 
     /// <summary>
+    /// 中文：正在把设置填进控件。填的过程中控件会抛出各种事件，那些都不是工人的
+    ///       操作，不该产生任何副作用。
+    /// English: True while the controls are being filled. They raise events as they are filled, and
+    ///          none of those are the operator's doing, so none may have side effects.
+    /// </summary>
+    private bool _isLoading;
+
+    /// <summary>
     /// 中文：构造窗口并把当前设置载进来。
     /// English: Creates the window and loads the current settings into it.
     /// </summary>
@@ -89,6 +97,20 @@ public partial class SettingsWindow : Window
     /// English: Fills the controls from the current settings.
     /// </summary>
     private void Load()
+    {
+        _isLoading = true;
+
+        try
+        {
+            LoadCore();
+        }
+        finally
+        {
+            _isLoading = false;
+        }
+    }
+
+    private void LoadCore()
     {
         var settings = CurrentApp.Settings;
 
@@ -153,13 +175,45 @@ public partial class SettingsWindow : Window
     /// English: The language applies immediately (spec §12); Cancel puts it back.
     /// </summary>
     private void OnLanguageChanged(object sender, SelectionChangedEventArgs e)
-        => Localizer.SetLanguage(
+    {
+        // ★ 同样的道理：SelectionChanged 也可能在构造途中触发。
+        //   载入期间不要动全局语言——那会在工人还没选之前就先切一次。
+        // The same hazard: SelectionChanged can fire mid-construction. The global language must not
+        // move while loading, which would switch it before the operator chose anything.
+        if (_isLoading)
+        {
+            return;
+        }
+
+        Localizer.SetLanguage(
             LanguageCombo.SelectedIndex == 1 ? UiLanguage.ChineseSimplified : UiLanguage.English);
+    }
 
     private void OnRuleTypeChanged(object sender, RoutedEventArgs e) => UpdateRulePanels();
 
+    /// <summary>
+    /// 中文：
+    ///   按当前选中的规则类型显示对应的那组输入框。
+    ///
+    ///   ★ 开头那个 null 检查不是防御性代码，是 WPF 的事实：控件的事件可以在
+    ///     InitializeComponent **进行中**触发，而那时后面才声明的 x:Name 字段
+    ///     仍然是 null。少了这一层，"点一下设置"就是一个从构造函数里抛出来、
+    ///     没人接住的空引用——现场看到的是程序卡死。
+    /// English:
+    ///   Shows the input group matching the selected rule type.
+    ///
+    ///   The null check is not defensive coding but a fact of WPF: a control's events can fire
+    ///   *during* InitializeComponent, while x:Name fields declared later in the XAML are still
+    ///   null. Without it, clicking Settings raises a NullReferenceException out of the
+    ///   constructor with nobody to catch it, and what the floor sees is a frozen program.
+    /// </summary>
     private void UpdateRulePanels()
     {
+        if (FixedRulePanel is null || RegexRulePanel is null)
+        {
+            return;
+        }
+
         var isFixed = FixedRuleRadio.IsChecked == true;
         FixedRulePanel.Visibility = isFixed ? Visibility.Visible : Visibility.Collapsed;
         RegexRulePanel.Visibility = isFixed ? Visibility.Collapsed : Visibility.Visible;

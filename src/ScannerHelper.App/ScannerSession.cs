@@ -191,13 +191,31 @@ public sealed class ScannerSession : IDisposable
     /// </summary>
     public (string TitleKey, Exception Failure)? Connect()
     {
+        // ★ **绝不持着 _gate 去碰 _source。**
+        //
+        //   _source 的开与关都会 join 串口读取线程，而那条线程正是在
+        //   OnScanReceived 里等 _gate 的那一个。持锁去关端口 = 界面等读取线程、
+        //   读取线程等锁——一个典型的抱死。它不会永远卡住（join 有两秒上限），
+        //   但界面会莫名其妙地僵两秒，而那两秒里工人多半会再点几下。
+        //
+        //   _gate 只保护处理器与模式；_source 自己有生命周期锁，不需要外面这一层。
+        // Never touch _source while holding _gate. Opening and closing the source join the serial
+        // reader thread, which is the very thread waiting on _gate inside OnScanReceived: the UI
+        // waits for the reader and the reader waits for the lock. It does not hang forever (the
+        // join has a two-second cap) but the UI freezes inexplicably for two seconds, and in those
+        // two seconds the operator will click several more times. _gate guards the processor and
+        // the mode; _source has a lifetime lock of its own and needs no second one.
+        SerialPortSettings portSettings;
+
+        lock (_gate)
+        {
+            _lastFaultMessage = null;
+            portSettings = _settings.SerialPort;
+        }
+
         try
         {
-            lock (_gate)
-            {
-                _lastFaultMessage = null;
-                _source.Connect(_settings.SerialPort);
-            }
+            _source.Connect(portSettings);
 
             Changed?.Invoke(this, EventArgs.Empty);
             return null;
@@ -226,11 +244,9 @@ public sealed class ScannerSession : IDisposable
     /// </summary>
     public void Disconnect()
     {
-        lock (_gate)
-        {
-            _source.Disconnect();
-        }
-
+        // 见 Connect：绝不持着 _gate 去碰 _source。
+        // See Connect: never touch _source while holding _gate.
+        _source.Disconnect();
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -329,17 +345,18 @@ public sealed class ScannerSession : IDisposable
     {
         ArgumentNullException.ThrowIfNull(settings);
 
-        bool needsReconnect;
+        var wasConnected = _source.IsConnected;
+        bool parametersChanged;
 
         lock (_gate)
         {
             var previous = _settings.SerialPort;
-            needsReconnect = _source.IsConnected
-                && (previous.PortName != settings.SerialPort.PortName
-                    || previous.BaudRate != settings.SerialPort.BaudRate
-                    || previous.DataBits != settings.SerialPort.DataBits
-                    || previous.Parity != settings.SerialPort.Parity
-                    || previous.StopBits != settings.SerialPort.StopBits);
+            parametersChanged =
+                previous.PortName != settings.SerialPort.PortName
+                || previous.BaudRate != settings.SerialPort.BaudRate
+                || previous.DataBits != settings.SerialPort.DataBits
+                || previous.Parity != settings.SerialPort.Parity
+                || previous.StopBits != settings.SerialPort.StopBits;
 
             _settings = settings;
             _processor.AppendEnterAfterScan = settings.AppendEnterAfterScan;
@@ -348,14 +365,30 @@ public sealed class ScannerSession : IDisposable
                 SkuValidatorFactory.Create(settings.SkuValidation));
         }
 
-        if (!needsReconnect)
+        var hasPort = !string.IsNullOrWhiteSpace(settings.SerialPort.PortName);
+
+        // ★ 还没连上、而现在有端口了 —— 必须连。
+        //
+        //   这是第一次使用时最常见的一步：程序开起来是"未连接"，工人进设置选了
+        //   COM3 再保存。若只在"本来就连着"的前提下才重连，那一步就什么都不会发生
+        //   ——他刚做完唯一该做的事，界面却还写着未连接。
+        // Not connected and a port is now configured — connect. This is the commonest first-run
+        // step: the program opens disconnected, the operator picks COM3 and saves. Reconnecting
+        // only when already connected would make that step do nothing, leaving the UI still saying
+        // "not connected" right after they did the one thing they were supposed to do.
+        if (!wasConnected)
+        {
+            return hasPort ? Connect() : null;
+        }
+
+        if (!parametersChanged)
         {
             Changed?.Invoke(this, EventArgs.Empty);
             return null;
         }
 
         Disconnect();
-        return Connect();
+        return hasPort ? Connect() : null;
     }
 
     /// <summary>
@@ -364,18 +397,27 @@ public sealed class ScannerSession : IDisposable
     /// </summary>
     public SessionSnapshot Snapshot()
     {
+        // 串口那几项在锁外读：它们由 _source 自己保护，而把它们放进临界区只会
+        // 让这把锁的作用域悄悄变大——最终就会有人在持锁时调用 Connect。
+        // The port properties are read outside the lock: _source guards them itself, and pulling
+        // them into the critical section only widens this lock's scope until somebody eventually
+        // calls Connect while holding it.
+        var isConnected = _source.IsConnected;
+        var portName = _source.PortName;
+        var timeSinceLastScan = _source.TimeSinceLastScan;
+
         lock (_gate)
         {
             return new SessionSnapshot(
-                IsConnected: _source.IsConnected,
-                PortName: _source.PortName,
+                IsConnected: isConnected,
+                PortName: portName,
                 Mode: _modeManager.CurrentMode,
                 IsPaused: _processor.IsPaused,
                 PendingErrorRawCode: _processor.PendingError?.RawCode,
                 LastScanFailureKey: _pendingFailureKey,
                 LastScanRawCode: _lastScanRawCode,
                 LastScanEmitted: _lastScanEmitted,
-                TimeSinceLastScan: _source.TimeSinceLastScan,
+                TimeSinceLastScan: timeSinceLastScan,
                 LastFaultMessage: _lastFaultMessage);
         }
     }

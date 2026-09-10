@@ -100,7 +100,20 @@
                 <TextBlock FontWeight="SemiBold" Margin="0,18,0,6"
                            Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsSkuRule]}" />
                 <StackPanel Orientation="Horizontal">
-                    <RadioButton x:Name="FixedRuleRadio" GroupName="RuleType" IsChecked="True"
+                    <!--
+                        中文：这里**刻意不写 IsChecked="True"**。
+                              XAML 里给它初值，Checked 会在 InitializeComponent 期间就触发，
+                              而那时 FixedRulePanel 这些字段还没赋值——处理器一访问就是空引用，
+                              异常从构造函数抛出去没人接，表现就是"点设置，程序卡死"。
+                              初值统一由 Load() 在构造完成之后设。
+                        English: IsChecked is deliberately absent here. Setting it in XAML fires
+                                 Checked during InitializeComponent, while FixedRulePanel and the
+                                 other named fields are still null — the handler dereferences null,
+                                 the exception escapes the constructor uncaught, and the symptom is
+                                 "click Settings and the program freezes". Load() sets the initial
+                                 state after construction instead.
+                    -->
+                    <RadioButton x:Name="FixedRuleRadio" GroupName="RuleType"
                                  Checked="OnRuleTypeChanged"
                                  Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsRuleFixed]}" />
                     <RadioButton x:Name="RegexRuleRadio" GroupName="RuleType" Margin="18,0,0,0"

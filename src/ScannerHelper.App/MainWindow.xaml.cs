@@ -223,8 +223,13 @@ public partial class MainWindow : Window
             SwitchHintText.Text = strings["SwitchModeHint"];
         }
 
+        // ★ 暂停按钮**永远可点**。它是安全阀（规格 §5.7），而一个会在某些状态下
+        //   变灰的安全阀，等于让工人先判断"现在能不能按"——需要它的那一刻恰恰是
+        //   最不适合做判断的时候。
+        // The Pause button is always clickable. It is the safety valve (spec §5.7), and a valve
+        // that greys out in some states makes the operator first work out whether it can be
+        // pressed — at precisely the moment least suited to working anything out.
         PauseButton.Content = strings[snapshot.IsPaused ? "Resume" : "Pause"];
-        PauseButton.IsEnabled = snapshot.IsConnected || snapshot.IsPaused;
 
         ConnectionText.Text = snapshot.IsConnected
             ? Localizer.Format("ConnectedOn", snapshot.PortName ?? string.Empty)
@@ -419,7 +424,7 @@ public partial class MainWindow : Window
         _refreshTimer.Stop();
         SaveBounds();
 
-        _compactWindow?.Close();
+        _compactWindow?.CloseForExit();
         Application.Current.Shutdown();
     }
 

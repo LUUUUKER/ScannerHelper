@@ -52,6 +52,7 @@ namespace ScannerHelper.App;
 public partial class CompactWindow : Window
 {
     private bool _isClosingForExpand;
+    private bool _isClosingForExit;
 
     /// <summary>
     /// 中文：构造窗口。
@@ -64,6 +65,29 @@ public partial class CompactWindow : Window
     /// English: The operator asked to expand back to Full.
     /// </summary>
     public event EventHandler? ExpandRequested;
+
+    /// <summary>
+    /// 中文：
+    ///   因为程序要退出而关闭。
+    ///
+    ///   ★ 必须和"工人点了小窗口的关闭按钮"分开。后者的含义是"我不想看到这个
+    ///     小窗口"，处理方式是展开回 Full；退出时若走同一条路，就会变成：主窗口
+    ///     正在关闭 → 关掉 Compact → Compact 取消关闭并请求展开 → 主窗口
+    ///     Show() 出来 …… 一次退出点击换来一个又冒出来的窗口。
+    /// English:
+    ///   Closes because the application is exiting.
+    ///
+    ///   This must be distinct from the operator clicking the small window's close button, which
+    ///   means "I do not want this little window" and is answered by expanding back to Full. Taking
+    ///   that path during exit would give: the main window is closing, it closes Compact, Compact
+    ///   cancels and asks to expand, the main window shows itself again — one exit click producing
+    ///   a window that reappears.
+    /// </summary>
+    public void CloseForExit()
+    {
+        _isClosingForExit = true;
+        Close();
+    }
 
     private static App CurrentApp => (App)Application.Current;
 
@@ -183,7 +207,7 @@ public partial class CompactWindow : Window
     {
         SaveBounds();
 
-        if (_isClosingForExpand || Application.Current.MainWindow is not { } main)
+        if (_isClosingForExpand || _isClosingForExit)
         {
             return;
         }
@@ -191,7 +215,6 @@ public partial class CompactWindow : Window
         e.Cancel = true;
         _isClosingForExpand = true;
         ExpandRequested?.Invoke(this, EventArgs.Empty);
-        _ = main;
     }
 
     private void SaveBounds()
