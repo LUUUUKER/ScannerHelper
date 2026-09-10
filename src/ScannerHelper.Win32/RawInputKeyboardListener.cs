@@ -55,6 +55,7 @@
 // =============================================================================
 
 using System.ComponentModel;
+using System.Diagnostics;
 using System.Runtime.InteropServices;
 using ScannerHelper.Win32.Native;
 using ScannerHelper.Win32.Observation;
@@ -324,6 +325,74 @@ public sealed class RawInputKeyboardListener : IDisposable
             DeviceHandle: rawInput.header.hDevice));
 
         return true;
+    }
+
+
+    /// <summary>
+    /// 中文：
+    ///   把队列里**已经到达**的 WM_INPUT 全部取出来处理掉，队列空则立刻返回。
+    ///   输入：windowHandle 本监听器注册时用的窗口句柄。
+    ///   输出：处理掉的条数。
+    ///
+    ///   ★ 这个方法专门给钩子回调用，解决一个先后顺序问题。
+    ///
+    ///     钩子回调必须当场决定这一下按键是吞还是放，而这个决定依赖 Raw Input
+    ///     揭示的来源。可 Raw Input 是**投递**到消息队列里的，取它要靠消息循环
+    ///     ——而钩子回调恰恰打断了消息循环。需要答案的那一刻，答案正躺在队列里
+    ///     没人去取；等消息循环重新跑起来，50 毫秒的关联窗口可能已经过了，
+    ///     那个按键就被判成「来源不明」按普通键盘重放出去（决策 D-13）。
+    ///
+    ///     扫码枪一枪几十个字符、字符间隔约 1.1 毫秒（Task 4a 实测），这条路径
+    ///     上积压几条消息是常态。积压一旦顶穿关联窗口，漏出去的就是条码的原始
+    ///     字符——正是规格禁止的那件事。
+    ///
+    ///   ★ 这不是时序上的经验值。它不猜任何东西，只是把我们自己的调度造成的
+    ///     延迟去掉，让关联窗口去衡量真实的通道时差。
+    ///
+    ///   只取 WM_INPUT，不碰别的消息：其它消息该由消息循环按自己的顺序处理。
+    ///   也不调 DispatchMessage —— 消息在这里就地处理完了，因此按 Raw Input 的
+    ///   约定补一次 DefWindowProc，让系统做它的清理。
+    /// English:
+    ///   Consumes every WM_INPUT already sitting in the queue, returning immediately when there
+    ///   is none. windowHandle is the one this listener registered with; the return value is how
+    ///   many were handled.
+    ///
+    ///   It exists for the hook callback, to fix an ordering problem. The callback must decide on
+    ///   the spot whether to swallow, and that decision depends on the source Raw Input reveals —
+    ///   but Raw Input is *posted*, retrieved by the message loop, and the hook callback is
+    ///   precisely what interrupts that loop. At the moment the answer is needed it sits in the
+    ///   queue untouched, and by the time the loop runs again the 50 ms correlation window may
+    ///   have passed, leaving the keystroke settled as "source unknown" and replayed as ordinary
+    ///   typing (decision D-13). A scan is dozens of characters about 1.1 ms apart (Task 4a), so
+    ///   a backlog here is routine — and a backlog that outlives the correlation window leaks the
+    ///   barcode's raw characters, which is exactly what the spec forbids.
+    ///
+    ///   This is not a timing heuristic: it guesses nothing and merely removes a delay of our own
+    ///   scheduler's making, so the correlation window measures the real inter-channel delta.
+    ///
+    ///   Only WM_INPUT is taken; other messages stay for the loop to handle in its own order.
+    ///   DispatchMessage is not called since the message is handled here, so Raw Input's
+    ///   convention is honored with a DefWindowProc call to let the system clean up.
+    /// </summary>
+    public int DrainQueued(IntPtr windowHandle)
+    {
+        var handled = 0;
+
+        while (WindowNative.PeekMessageW(
+                   out var message,
+                   windowHandle,
+                   NativeMethods.WM_INPUT,
+                   NativeMethods.WM_INPUT,
+                   WindowNative.PM_REMOVE))
+        {
+            var timestamp = Stopwatch.GetTimestamp();
+            HandleRawInput(message.lParam, timestamp);
+            WindowNative.DefWindowProcW(
+                message.hwnd, message.message, message.wParam, message.lParam);
+            handled++;
+        }
+
+        return handled;
     }
 
     /// <summary>

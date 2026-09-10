@@ -174,7 +174,8 @@
 
                 <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
                            Text="计数 / Counters" />
-                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" Background="#F6F6F6">
+                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" x:Name="CountersBorder"
+                        Background="#F6F6F6">
                     <TextBlock x:Name="CountersText" FontFamily="Consolas, Courier New, monospace"
                                FontSize="12" TextWrapping="Wrap" Text="—" />
                 </Border>

@@ -402,8 +402,23 @@ public partial class InterceptionWindow : Window
         counters.AppendLine(CultureInfo.InvariantCulture, $"放行 / Passed        {snapshot.PassedThroughCount}");
         counters.AppendLine(CultureInfo.InvariantCulture, $"补发 / Replayed      {snapshot.ReplayedCount}");
         counters.AppendLine(CultureInfo.InvariantCulture, $"Raw Input           {snapshot.RawInputCount}");
-        counters.Append(CultureInfo.InvariantCulture, $"扫描 / Scans         {snapshot.ScanCount}");
+        counters.AppendLine(CultureInfo.InvariantCulture, $"扫描 / Scans         {snapshot.ScanCount}");
+        counters.AppendLine();
+        counters.AppendLine(CultureInfo.InvariantCulture,
+            $"★ 超时未关联 / Unresolved  {snapshot.UnresolvedEventCount}");
+        counters.Append(CultureInfo.InvariantCulture,
+            $"丢弃的 Raw Input / Discarded {snapshot.DiscardedRawInputCount}");
         CountersText.Text = counters.ToString();
+
+        // ★ 超时未关联不为 0 就变色。扫码期间这个数每加一，就是一个条码字符
+        //   以原始形态漏进了业务软件——现场看到的「结果里多了一两个字母」、
+        //   「一枪被回车劈成两行」，说的都是它。
+        // A non-zero unresolved count is colored. During a scan each increment is one barcode
+        // character leaking into the business application in raw form — which is what "an extra
+        // letter or two in the result" and "one scan split across two lines" actually are.
+        CountersBorder.Background = snapshot.UnresolvedEventCount > 0
+            ? new SolidColorBrush(Color.FromRgb(0xFF, 0xF4, 0xE5))
+            : new SolidColorBrush(Color.FromRgb(0xF6, 0xF6, 0xF6));
 
         var budget = new StringBuilder();
         budget.AppendLine(CultureInfo.InvariantCulture,

@@ -561,7 +561,15 @@ public sealed class MessageOnlyCaptureHost : IDisposable
         {
             var timestamp = Stopwatch.GetTimestamp();
             _work.OnRawInputMessage(lParam, timestamp);
-            return IntPtr.Zero;
+
+            // ★ WM_INPUT 处理完仍要交给 DefWindowProc：Raw Input 的约定是由它
+            //   做清理，不调会积累原生资源。返回 0 就完事看起来能用，代价是
+            //   一台连着扫码的机器跑上一整个班次之后慢慢变糟——最难查的那种。
+            // WM_INPUT must still reach DefWindowProc: Raw Input's convention leaves the cleanup
+            // to it, and skipping it accumulates native resources. Returning zero appears to work,
+            // at the cost of a machine that scans all shift slowly degrading — the hardest kind of
+            // problem to trace.
+            return WindowNative.DefWindowProcW(windowHandle, message, wParam, lParam);
         }
 
         if (message == WindowNative.WM_TIMER && (nuint)wParam == TickTimerId)

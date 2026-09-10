@@ -176,6 +176,47 @@ internal static class WindowNative
     internal static extern int GetMessageW(
         out MSG message, IntPtr windowHandle, uint filterMin, uint filterMax);
 
+    /// <summary>
+    /// 中文：
+    ///   查看队列里有没有指定范围的消息，有就取走；队列空时**立刻返回 false**，
+    ///   不阻塞。
+    ///
+    ///   ★ 它存在的理由是一个先后顺序问题：钩子回调必须当场决定这一下按键是
+    ///     吞还是放，而这个决定依赖 Raw Input 揭示的来源；可 Raw Input 是**投递**
+    ///     到消息队列里的，而钩子回调恰恰打断了消息循环——需要答案的那一刻，
+    ///     答案正躺在队列里没人去取。
+    ///
+    ///     用它在回调开头把已经到达的 WM_INPUT 先取出来处理掉，等于把答案提前
+    ///     捞上来。这不是时序上的经验值（那是规格禁止的），恰恰相反：它消除的是
+    ///     我们自己的调度造成的延迟，让 50 毫秒的关联窗口去衡量真实的通道时差，
+    ///     而不是去和我们自己的消息循环赛跑。
+    /// English:
+    ///   Looks for a message in the given range and removes it if present, returning false
+    ///   immediately on an empty queue rather than blocking.
+    ///
+    ///   It exists to fix an ordering problem: the hook callback must decide on the spot whether
+    ///   to swallow a keystroke, and that decision depends on the source Raw Input reveals — but
+    ///   Raw Input is *posted* to the message queue, and the hook callback is precisely what
+    ///   interrupts the message loop. At the moment the answer is needed it is sitting in the
+    ///   queue with nobody taking it out.
+    ///
+    ///   Using this at the top of the callback to consume already-arrived WM_INPUT pulls the
+    ///   answer forward. This is not a timing heuristic (which the spec forbids) but the
+    ///   opposite: it removes a delay of our own scheduler's making, so that the 50 ms
+    ///   correlation window measures the real inter-channel delta instead of racing our own
+    ///   message loop.
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true, EntryPoint = "PeekMessageW")]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool PeekMessageW(
+        out MSG message, IntPtr windowHandle, uint filterMin, uint filterMax, uint removeFlag);
+
+    /// <summary>
+    /// 中文：取走消息（而不是只看一眼）。
+    /// English: Removes the message rather than only inspecting it.
+    /// </summary>
+    internal const uint PM_REMOVE = 0x0001;
+
     [DllImport("user32.dll", EntryPoint = "DispatchMessageW")]
     internal static extern IntPtr DispatchMessageW(ref MSG message);
 

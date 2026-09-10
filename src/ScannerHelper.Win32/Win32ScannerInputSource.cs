@@ -211,6 +211,7 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
 
     private LowLevelKeyboardHook? _hook;
     private RawInputKeyboardListener? _rawInput;
+    private IntPtr _windowHandle;
 
     private long _boundDeviceHandle;
     private long _swallowedCount;
@@ -576,6 +577,7 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     /// </summary>
     void ICaptureThreadWork.OnCaptureStarted(IntPtr windowHandle)
     {
+        _windowHandle = windowHandle;
         _rawInput = new RawInputKeyboardListener(OnRawInputObserved);
         _rawInput.Register(windowHandle);
 
@@ -583,9 +585,24 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
         _hook.Install();
     }
 
-    /// <inheritdoc />
+    /// <summary>
+    /// 中文：
+    ///   消息循环取到一条 WM_INPUT。处理完就地把输出队列排空——这里不是钩子
+    ///   回调，可以真的发送。
+    ///
+    ///   而且这是 99.4% 的路径（Task 4a 实测钩子恒先于 WM_INPUT 到达），
+    ///   被扣留的按键绝大多数在这里就立刻放出去，补发延迟极小。
+    /// English:
+    ///   The message loop retrieved one WM_INPUT. The output queue is drained here because this
+    ///   is not the hook callback and sending is allowed — and it is the 99.4% path (Task 4a
+    ///   measured the hook always preceding WM_INPUT), so withheld keystrokes are almost always
+    ///   released right here with minimal replay latency.
+    /// </summary>
     void ICaptureThreadWork.OnRawInputMessage(IntPtr rawInputHandle, long timestamp)
-        => _rawInput?.HandleRawInput(rawInputHandle, timestamp);
+    {
+        _rawInput?.HandleRawInput(rawInputHandle, timestamp);
+        _output.Drain();
+    }
 
     /// <summary>
     /// 中文：
@@ -701,6 +718,25 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
 
         try
         {
+            // 步骤 2.5 —— 先把已经到达的 WM_INPUT 取出来处理掉。
+            //
+            // ★ 关联的答案来自 Raw Input，而 Raw Input 是投递到消息队列里的，
+            //   取它靠消息循环——可本回调恰恰打断了消息循环。不先捞一把，
+            //   需要答案的那一刻答案还在队列里；等循环重新跑起来，50 毫秒的
+            //   关联窗口可能已经过了，那个按键就被判成「来源不明」按普通键盘
+            //   重放出去（决策 D-13）。对扫码枪来说，那等于把条码的原始字符
+            //   漏进业务软件——规格明令禁止的事。
+            //
+            // Step 2.5 — consume WM_INPUT that has already arrived. Correlation's answer comes
+            // from Raw Input, which is posted to the message queue and retrieved by the message
+            // loop — the very loop this callback interrupts. Without pulling it forward, the
+            // answer is still queued at the moment it is needed, and by the time the loop runs
+            // again the 50 ms window may have passed, settling the keystroke as "source unknown"
+            // and replaying it as ordinary typing (decision D-13). For the scanner that means
+            // leaking the barcode's raw characters into the business application, which the spec
+            // forbids outright.
+            _rawInput?.DrainQueued(_windowHandle);
+
             // 步骤 3 / Step 3
             var keyEvent = new KeyEvent(
                 Timestamp: StopwatchSystemClock.ToMonotonic(observedEvent.Timestamp),
@@ -780,15 +816,14 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
                 IsKeyUp: observedEvent.IsKeyUp,
                 DeviceId: observedEvent.DeviceHandle));
 
-            // 这里跑在消息循环上，不是钩子回调里，可以直接发。
-            // 而且这是 99.4% 的路径（Task 4a 实测钩子恒先于 WM_INPUT 到达），
-            // 所以被扣留的按键绝大多数在这里就立刻放出去了，补发延迟极小。
-            //
-            // This runs on the message loop rather than in the hook callback, so it can send
-            // directly — and it is the 99.4% path (Task 4a measured the hook always preceding
-            // WM_INPUT), so withheld keystrokes are almost always released right here, with
-            // minimal replay latency.
-            _output.Drain();
+            // ★ 这里**不发送**。本方法既可能由消息循环调用，也可能由钩子回调
+            //   里的 DrainQueued 调用，而后者绝不允许发送（见 DeferredKeyboardOutput）。
+            //   排空交给两个调用点各自决定：消息循环那边就地排空，钩子回调那边
+            //   投递一条消息让循环去排。
+            // Nothing is sent here. This is called both from the message loop and from
+            // DrainQueued inside the hook callback, and the latter must never send (see
+            // DeferredKeyboardOutput). Draining is left to each call site: the message loop drains
+            // in place, the hook callback posts a message for the loop to drain.
         }
         catch (Exception rawInputException)
         {

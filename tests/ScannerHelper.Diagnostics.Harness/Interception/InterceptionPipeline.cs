@@ -75,6 +75,27 @@ public readonly record struct ScanLogEntry(
 /// English: One instantaneous snapshot for the UI. Taken all at once so the UI does not read
 ///          properties one by one and end up displaying mutually inconsistent numbers.
 /// </summary>
+/// <remarks>
+/// 中文：
+///   ★ 这份快照里最重要的一个数字是 <c>UnresolvedEventCount</c>。
+///
+///     它数的是"扣留了却始终没等到 Raw Input、只好按超时规则当成普通键盘
+///     补发出去"的按键（决策 D-13）。工人打字时它不为 0 只是延迟大了一点；
+///     **扫码期间它不为 0，意味着条码的原始字符正以扫描码的形式漏进业务
+///     软件**——正是规格禁止的那件事，而且现场看到的就是"结果里多了一两个
+///     字母"、"一枪被回车劈成两行"。
+///
+///     其余的计数只说明流水线在动，只有这一个说明它做对没做对。
+/// English:
+///   The most important number here is UnresolvedEventCount: keystrokes that were withheld,
+///   never met their Raw Input counterpart, and had to be released as ordinary typing by the
+///   expiry rule (decision D-13). While a person types, a non-zero value only means slightly
+///   more latency. During a scan it means the barcode's raw characters are leaking into the
+///   business application as scan codes — exactly what the spec forbids, and what shows up on
+///   screen as "an extra letter or two in the result" and "one scan split across two lines".
+///
+///   The other counters say the pipeline is moving; only this one says whether it is right.
+/// </remarks>
 public readonly record struct PipelineSnapshot(
     bool IsRunning,
     bool IsPaused,
@@ -87,6 +108,8 @@ public readonly record struct PipelineSnapshot(
     long ReplayedCount,
     long RawInputCount,
     long ScanCount,
+    long UnresolvedEventCount,
+    long DiscardedRawInputCount,
     TimeSpan MaximumHookCallbackDuration,
     long HookCallbackBudgetExceededCount,
     long FaultCount,
@@ -292,6 +315,8 @@ public sealed class InterceptionPipeline : IDisposable
             ReplayedCount: _source.ReplayedCount,
             RawInputCount: _source.RawInputCount,
             ScanCount: _source.ScanCount,
+            UnresolvedEventCount: _correlator.UnresolvedEventCount,
+            DiscardedRawInputCount: _correlator.DiscardedRawInputCount,
             MaximumHookCallbackDuration: _source.MaximumHookCallbackDuration,
             HookCallbackBudgetExceededCount: _source.HookCallbackBudgetExceededCount,
             FaultCount: _source.FaultCount,

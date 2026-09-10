@@ -360,6 +360,26 @@ public sealed class GateChecklist
                 snapshot.SwallowedCount));
         }
 
+        // 4.5 —— 有按键始终没等到 Raw Input，只好按超时规则原样重放。
+        //        扫码期间这等于条码的原始字符漏进了业务软件（规格禁止），
+        //        现场表现就是「结果里多了一两个字母」「一枪被回车劈成两行」。
+        // 4.5 — keystrokes never met their Raw Input counterpart and were replayed by the expiry
+        //       rule. During a scan that is the barcode's raw characters leaking into the business
+        //       application, which the spec forbids; on screen it is "an extra letter or two" and
+        //       "one scan split across two lines".
+        if (snapshot.UnresolvedEventCount > 0)
+        {
+            contradictions.Add(string.Format(
+                CultureInfo.InvariantCulture,
+                "有 {0} 个按键始终没等到 Raw Input，被按超时规则当成普通键盘原样重放（决策 D-13）。"
+                + "如果其中有扫码枪的字符，那就是条码原文漏进了业务软件——第 5、6 条不成立。"
+                + " / {0} keystrokes never met their Raw Input counterpart and were replayed as"
+                + " ordinary typing by the expiry rule (decision D-13). Any scanner characters"
+                + " among them are raw barcode content leaking into the business application,"
+                + " which voids items 5 and 6.",
+                snapshot.UnresolvedEventCount));
+        }
+
         // 5 —— 流水线抛过异常。
         // 5 — the pipeline threw.
         if (snapshot.FaultCount > 0)
@@ -460,6 +480,10 @@ public sealed class GateChecklist
         report.AppendLine(CultureInfo.InvariantCulture, $"- 补发 / Replayed: {snapshot.ReplayedCount}");
         report.AppendLine(CultureInfo.InvariantCulture, $"- Raw Input 事件 / events: {snapshot.RawInputCount}");
         report.AppendLine(CultureInfo.InvariantCulture, $"- 处理完成的扫描 / Scans processed: {snapshot.ScanCount}");
+        report.AppendLine(CultureInfo.InvariantCulture,
+            $"- **超时未关联 / Unresolved (expired, replayed raw): {snapshot.UnresolvedEventCount}**");
+        report.AppendLine(CultureInfo.InvariantCulture,
+            $"- 丢弃的 Raw Input / Discarded raw input: {snapshot.DiscardedRawInputCount}");
         report.AppendLine(CultureInfo.InvariantCulture,
             $"- 钩子回调最长耗时 / Longest hook callback: {snapshot.MaximumHookCallbackDuration.TotalMilliseconds:0.000} ms");
         report.AppendLine(CultureInfo.InvariantCulture,
