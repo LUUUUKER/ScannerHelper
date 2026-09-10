@@ -191,6 +191,13 @@ public static class UiStrings
         ["SettingsErrorSoundHint"] =
             "The one worth hearing: during an error you may be looking at the goods rather than the"
             + " screen.",
+        ["SettingsDiagnostics"] = "Diagnostics",
+        ["SettingsMaskBarcodes"] = "Mask barcode content in the log",
+        ["SettingsMaskBarcodesHint"] =
+            "Keeps the first and last two characters and the length: AB************89. Enough to"
+            + " investigate, without leaving a full record of goods on disk.",
+        ["SettingsRetention"] = "Keep logs for (days)",
+        ["SettingsOpenLogFolder"] = "Open the log folder",
         ["SettingsStartWithWindows"] = "Start with Windows",
         ["SettingsSave"] = "Save",
         ["SettingsCancel"] = "Cancel",
@@ -301,6 +308,12 @@ public static class UiStrings
         ["SettingsModeSoundHint"] = "一声：SN 低音、SKU 高音。默认关闭——仓库本来就不安静，没人要求的提示音就是噪声。",
         ["SettingsErrorSound"] = "一枪没发出去时响一声",
         ["SettingsErrorSoundHint"] = "这一声最值得开：出错时你可能正低头看货，看不到屏幕上的红色。",
+        ["SettingsDiagnostics"] = "诊断日志",
+        ["SettingsMaskBarcodes"] = "日志里遮住条码内容",
+        ["SettingsMaskBarcodesHint"] =
+            "保留首尾各两位和长度：AB************89。够用来查问题，又不会在磁盘上留下一份完整的货品流水。",
+        ["SettingsRetention"] = "日志保留天数",
+        ["SettingsOpenLogFolder"] = "打开日志文件夹",
         ["SettingsStartWithWindows"] = "开机自动启动",
         ["SettingsSave"] = "保存",
         ["SettingsCancel"] = "取消",

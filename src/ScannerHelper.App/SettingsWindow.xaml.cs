@@ -154,6 +154,9 @@ public partial class SettingsWindow : Window
         IgnoreCaseCheck.IsChecked = validation.IgnoreCase;
         ValidationRegexBox.Text = validation.ValidationRegexPattern ?? string.Empty;
 
+        MaskBarcodesCheck.IsChecked = settings.Diagnostics.MaskBarcodeData;
+        RetentionBox.Text = settings.Diagnostics.LogRetentionDays.ToString(CultureInfo.InvariantCulture);
+
         AppendEnterCheck.IsChecked = settings.AppendEnterAfterScan;
         ModeSoundCheck.IsChecked = settings.ModeSwitchSoundEnabled;
         ErrorSoundCheck.IsChecked = settings.ErrorSoundEnabled;
@@ -451,6 +454,39 @@ public partial class SettingsWindow : Window
             _ => failure.ToString() ?? string.Empty,
         }));
 
+    /// <summary>
+    /// 中文：
+    ///   在资源管理器里打开日志文件夹。
+    ///
+    ///   ★ 有这个按钮，是因为日志在 %AppData% 下——那是一个工人根本不知道怎么
+    ///     找到的地方。而"出问题时把日志发过来"这件事，如果第一步就是"先找到
+    ///     一个隐藏目录"，那多半就不会发生了。
+    /// English:
+    ///   Opens the log folder in Explorer. The button exists because the logs live under %AppData%,
+    ///   a place an operator has no idea how to reach — and "send me the log when it goes wrong"
+    ///   mostly does not happen if its first step is finding a hidden directory.
+    /// </summary>
+    private void OnOpenLogFolderClicked(object sender, RoutedEventArgs e)
+    {
+        if (CurrentApp.Log is not { } log)
+        {
+            return;
+        }
+
+        try
+        {
+            System.IO.Directory.CreateDirectory(log.Directory);
+            System.Diagnostics.Process.Start(
+                new System.Diagnostics.ProcessStartInfo(log.Directory) { UseShellExecute = true });
+        }
+        catch (Exception openException)
+        {
+            MessageBox.Show(
+                this, openException.Message, Localizer.Get("SettingsTitle"),
+                MessageBoxButton.OK, MessageBoxImage.Warning);
+        }
+    }
+
     private void OnSaveClicked(object sender, RoutedEventArgs e)
     {
         if (BuildParsingSettings() is not { } parsing)
@@ -469,6 +505,22 @@ public partial class SettingsWindow : Window
         settings.SkuParsing = parsing;
         settings.SkuValidation = validation;
         settings.AppendEnterAfterScan = AppendEnterCheck.IsChecked == true;
+        settings.Diagnostics.MaskBarcodeData = MaskBarcodesCheck.IsChecked == true;
+
+        if (int.TryParse(RetentionBox.Text, out var retentionDays) && retentionDays >= 1)
+        {
+            settings.Diagnostics.LogRetentionDays = retentionDays;
+        }
+
+        // 立刻生效：遮码是工人**刚刚**做的决定，等下次启动才生效等于这一次没生效。
+        // Applied immediately: masking is a decision just made, and taking effect only at the next
+        // launch means it did not take effect.
+        if (CurrentApp.Log is { } log)
+        {
+            log.IsMaskingEnabled = settings.Diagnostics.MaskBarcodeData;
+            log.RetentionDays = settings.Diagnostics.LogRetentionDays;
+        }
+
         settings.ModeSwitchSoundEnabled = ModeSoundCheck.IsChecked == true;
         settings.ErrorSoundEnabled = ErrorSoundCheck.IsChecked == true;
         settings.SerialPort.PortName = PortCombo.SelectedItem as string;

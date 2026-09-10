@@ -47,7 +47,9 @@
 // =============================================================================
 
 using System.IO;
+using System.Reflection;
 using System.Windows;
+using ScannerHelper.Core.Diagnostics;
 using ScannerHelper.App.Localization;
 using ScannerHelper.Core.Settings;
 
@@ -71,6 +73,7 @@ public partial class App : Application
     private const string SingleInstanceMutexName = @"Local\ScannerHelper.SingleInstance";
 
     private Mutex? _singleInstanceMutex;
+    private RollingFileLog? _log;
     private JsonSettingsStore? _settingsStore;
     private SettingsRecoveredEventArgs? _recovery;
 
@@ -85,6 +88,13 @@ public partial class App : Application
     /// English: The current session.
     /// </summary>
     public ScannerSession? Session { get; private set; }
+
+    /// <summary>
+    /// 中文：诊断日志（规格 §15）。设置界面用它开关遮码、打开日志目录。
+    /// English: The diagnostic log (spec §15); Settings uses it to toggle masking and open the
+    ///          folder.
+    /// </summary>
+    public RollingFileLog? Log => _log;
 
     /// <summary>
     /// 中文：把配置存回磁盘。设置窗口保存之后调用。
@@ -124,9 +134,33 @@ public partial class App : Application
         // Step 3 — settle the language (spec §12)
         Localizer.Initialize(Settings.Language);
 
+        // 步骤 3.5 —— 建日志。**在会话之前**，因为会话从第一次连接起就要记东西。
+        //
+        // ★ 日志放在配置文件旁边而不是程序目录下：程序可能装在 Program Files
+        //   这种普通权限写不进去的地方，而本程序绝不提权（规格 §2.1 假设 A2）。
+        //   写不进去的日志等于没有日志，而且失败得毫无声息。
+        // Step 3.5 — the log, before the session, which records from its first connection onward.
+        // It lives beside the settings file rather than beside the executable: the program may be
+        // installed under Program Files, which is not writable without elevation, and this program
+        // never elevates (spec §2.1, assumption A2). A log that cannot be written is no log at all,
+        // and it fails silently.
+        var version = Assembly.GetExecutingAssembly().GetName().Version?.ToString() ?? "?";
+
+        _log = new RollingFileLog(
+            Path.Combine(
+                Path.GetDirectoryName(JsonSettingsStore.DefaultSettingsFilePath)
+                    ?? Path.GetTempPath(),
+                "logs"),
+            version,
+            Settings.Diagnostics.LogRetentionDays,
+            Settings.Diagnostics.MaskBarcodeData);
+
+        _log.Write(new DiagnosticEvent(
+            DateTimeOffset.Now, DiagnosticEventKind.Started, Detail: version));
+
         // 步骤 4 —— 建会话并尝试连接
         // Step 4 — build the session and try to connect
-        Session = new ScannerSession(Settings);
+        Session = new ScannerSession(Settings, _log);
 
         var failure = string.IsNullOrWhiteSpace(Settings.SerialPort.PortName)
             ? null
@@ -201,6 +235,8 @@ public partial class App : Application
 
     private void OnExit(object sender, ExitEventArgs e)
     {
+        _log?.Write(new DiagnosticEvent(DateTimeOffset.Now, DiagnosticEventKind.Stopped));
+
         Session?.Dispose();
 
         // ★ 退出时存一次配置：窗口位置、语言、模式以外的一切都在这里落盘。
@@ -222,6 +258,10 @@ public partial class App : Application
                 // The consequence is defaults next launch, which does not justify blocking shutdown.
             }
         }
+
+        // ★ 日志最后释放：上面每一步都可能还要记东西，而 Dispose 会等队列排空。
+        // The log is disposed last: every step above may still write, and Dispose drains the queue.
+        _log?.Dispose();
 
         _singleInstanceMutex?.Dispose();
     }

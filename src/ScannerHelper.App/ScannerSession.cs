@@ -58,6 +58,7 @@
 // =============================================================================
 
 using System.IO;
+using ScannerHelper.Core.Diagnostics;
 using ScannerHelper.Core.Domain;
 using ScannerHelper.Core.Input;
 using ScannerHelper.Core.Modes;
@@ -114,6 +115,18 @@ public sealed class ScannerSession : IDisposable
     private readonly IKeyboardOutputService _output = new SendInputKeyboardOutputService();
     private readonly ScanProcessor _processor;
 
+    /// <summary>
+    /// 中文：
+    ///   诊断日志（规格 §15）。会话是唯一知道"刚刚发生了什么"的地方，所以记录
+    ///   也应当在这里发生——放到界面上去记，界面被关掉或者切成 Compact 的那段
+    ///   时间就会出现空洞，而那恰恰常常是出问题的时段。
+    /// English:
+    ///   The diagnostic log (spec §15). The session is the only place that knows what just
+    ///   happened, so recording belongs here: logging from the UI would leave holes for the periods
+    ///   when the window is closed or in Compact, which are often exactly the periods that go wrong.
+    /// </summary>
+    private readonly IDiagnosticLog _log;
+
     private AppSettings _settings;
     private string? _pendingFailureKey;
     private string? _lastScanRawCode;
@@ -151,10 +164,13 @@ public sealed class ScannerSession : IDisposable
     /// <exception cref="ArgumentNullException">
     /// 中文：settings 为 null。 English: settings is null.
     /// </exception>
-    public ScannerSession(AppSettings settings)
+    public ScannerSession(AppSettings settings, IDiagnosticLog log)
     {
         ArgumentNullException.ThrowIfNull(settings);
+        ArgumentNullException.ThrowIfNull(log);
+
         _settings = settings;
+        _log = log;
 
         _processor = new ScanProcessor(
             _modeManager,
@@ -294,6 +310,11 @@ public sealed class ScannerSession : IDisposable
                 RecordBinding(connectedPort);
             }
 
+            _log.Write(new DiagnosticEvent(
+                DateTimeOffset.Now,
+                DiagnosticEventKind.Connected,
+                Detail: portSettings.PortName));
+
             Changed?.Invoke(this, EventArgs.Empty);
             return null;
         }
@@ -324,6 +345,9 @@ public sealed class ScannerSession : IDisposable
         // 见 Connect：绝不持着 _gate 去碰 _source。
         // See Connect: never touch _source while holding _gate.
         _source.Disconnect();
+
+        _log.Write(new DiagnosticEvent(DateTimeOffset.Now, DiagnosticEventKind.Disconnected));
+
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -340,6 +364,9 @@ public sealed class ScannerSession : IDisposable
             _modeManager.Toggle();
             mode = _modeManager.CurrentMode;
         }
+
+        _log.Write(new DiagnosticEvent(
+            DateTimeOffset.Now, DiagnosticEventKind.ModeChanged, Mode: Describe(mode)));
 
         ModeToggled?.Invoke(this, mode);
         Changed?.Invoke(this, EventArgs.Empty);
@@ -363,6 +390,7 @@ public sealed class ScannerSession : IDisposable
             _pendingFailureKey = null;
         }
 
+        _log.Write(new DiagnosticEvent(DateTimeOffset.Now, DiagnosticEventKind.Paused));
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -377,6 +405,7 @@ public sealed class ScannerSession : IDisposable
             _processor.Resume();
         }
 
+        _log.Write(new DiagnosticEvent(DateTimeOffset.Now, DiagnosticEventKind.Resumed));
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
@@ -555,6 +584,19 @@ public sealed class ScannerSession : IDisposable
     {
         var raised = false;
 
+        // ★ 每一枪都记，成功的也记（规格 §15）。
+        //
+        //   只记失败看着"省日志"，实际是把最要紧的一类问题变成查不了的：
+        //   "这批货有几件没进系统"——那时需要的恰恰是成功的那些记录，用来和
+        //   仓库系统里的条目对账。失败的记录只能告诉你哪些没进去，对不出
+        //   哪些**本该**进去。
+        // Every scan is recorded, successes included (spec §15). Logging only failures looks
+        // economical and makes the most important class of question unanswerable: "some items in
+        // this batch never reached the system" needs the successful entries, to reconcile against
+        // what the warehouse system holds. Failures alone say which did not arrive, never which
+        // should have.
+        _log.Write(BuildScanEvent(args.Outcome));
+
         lock (_gate)
         {
             switch (args.Outcome)
@@ -606,6 +648,45 @@ public sealed class ScannerSession : IDisposable
     }
 
     /// <summary>
+    /// 中文：把一枪的结局变成一条日志记录（规格 §15）。
+    /// English: Turns a scan outcome into one log entry (spec §15).
+    /// </summary>
+    private DiagnosticEvent BuildScanEvent(ScanOutcome outcome)
+    {
+        var mode = Describe(_modeManager.CurrentMode);
+        var now = DateTimeOffset.Now;
+
+        return outcome switch
+        {
+            ScanOutcome.Emit emit => new DiagnosticEvent(
+                now, DiagnosticEventKind.Emitted, mode, emit.RawCode, emit.Text),
+
+            ScanOutcome.EmitRawWhilePaused paused => new DiagnosticEvent(
+                now, DiagnosticEventKind.EmittedWhilePaused, mode, paused.RawCode),
+
+            ScanOutcome.ParseFailed parseFailed => new DiagnosticEvent(
+                now, DiagnosticEventKind.ParseFailed, mode, parseFailed.Failure.RawCode,
+                Detail: parseFailed.Failure.Reason.ToString()),
+
+            ScanOutcome.ValidationFailed validationFailed => new DiagnosticEvent(
+                now, DiagnosticEventKind.ValidationFailed, mode, validationFailed.RawCode,
+                validationFailed.Sku,
+                string.Join("; ", validationFailed.Failure.Failures)),
+
+            ScanOutcome.ForceSent forceSent => new DiagnosticEvent(
+                now, DiagnosticEventKind.ForceSent, mode, forceSent.RawCode),
+
+            ScanOutcome.Cancelled cancelled => new DiagnosticEvent(
+                now, DiagnosticEventKind.Discarded, mode, cancelled.RawCode),
+
+            _ => new DiagnosticEvent(now, DiagnosticEventKind.Fault, mode,
+                Detail: outcome.ToString()),
+        };
+    }
+
+    private static string Describe(ScanMode mode) => mode == ScanMode.Sn ? "SN" : "SKU";
+
+    /// <summary>
     /// 中文：
     ///   串口出错，多半是设备被拔掉。
     ///   记下来并通知界面——设备没了却不告诉工人，界面会继续显示"已连接"，
@@ -621,6 +702,9 @@ public sealed class ScannerSession : IDisposable
         {
             _lastFaultMessage = exception.Message;
         }
+
+        _log.Write(new DiagnosticEvent(
+            DateTimeOffset.Now, DiagnosticEventKind.Fault, Detail: exception.Message));
 
         // 见 _isFaultPending 的说明：断开必须换一条线程去做。
         // See _isFaultPending: disconnecting has to happen on another thread.
@@ -804,7 +888,15 @@ public sealed class ScannerSession : IDisposable
             }
 
             SetSuggestion(null, null);
-            Connect();
+
+            if (Connect() is null)
+            {
+                _log.Write(new DiagnosticEvent(
+                    DateTimeOffset.Now,
+                    DiagnosticEventKind.Reconnected,
+                    Detail: $"{portName} ({match.Confidence})"));
+            }
+
             return;
         }
 

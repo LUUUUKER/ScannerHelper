@@ -274,6 +274,41 @@
                            Foreground="{StaticResource MutedTextBrush}"
                            Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsErrorSoundHint]}" />
 
+                <!--
+                    中文：
+                      诊断日志（规格 §15）。
+
+                      ★ 遮码开关配一句说明，写明"遮成什么样"。工人要判断的是
+                        "这样会不会泄露货品信息"，而这个判断只有看到样子才做得出来
+                        ——一个只写着"遮住条码内容"的开关，等于让他凭猜测决定。
+                    English:
+                      Diagnostics (spec §15). The masking switch carries a note showing what masking
+                      looks like: the question the operator is answering is whether this leaks goods
+                      information, and that cannot be judged without seeing the shape. A switch
+                      labelled only "mask barcode content" asks them to decide by guessing.
+                -->
+                <TextBlock FontWeight="SemiBold" Margin="0,18,0,6"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsDiagnostics]}" />
+                <CheckBox x:Name="MaskBarcodesCheck"
+                          Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsMaskBarcodes]}" />
+                <TextBlock Margin="22,4,0,0" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsMaskBarcodesHint]}" />
+                <Grid Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="70" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                               Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsRetention]}" />
+                    <TextBox x:Name="RetentionBox" Grid.Column="1" Height="26" Margin="8,0,0,0"
+                             VerticalContentAlignment="Center" />
+                    <Button x:Name="OpenLogFolderButton" Grid.Column="2" Height="26" Margin="10,0,0,0"
+                            Padding="12,0" HorizontalAlignment="Left" Click="OnOpenLogFolderClicked"
+                            Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsOpenLogFolder]}" />
+                </Grid>
+
                 <CheckBox x:Name="StartWithWindowsCheck" Margin="0,18,0,0"
                           Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsStartWithWindows]}" />
 
