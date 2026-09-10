@@ -2,127 +2,72 @@
 // InputCaptureThread.cs
 //
 // 中文：
-//   一条专用线程，独占钩子、Raw Input 注册和它们共用的消息循环。
+//   Task 4a 的观测捕获：装上钩子与 Raw Input，把两条通道的事件原样写进观测
+//   缓冲区，**不拦截任何东西**。
 //
-//   ★ 这个类是第一轮实测的直接产物。
+//   线程、仅消息窗口、消息循环这些机制不在本文件里，都在 MessageOnlyCaptureHost
+//   ——4b 的拦截流水线用的是同一份（理由见那个文件与 ICaptureThreadWork）。
+//   本文件只剩下 4a 独有的那一件事：观测。
 //
-//     第一轮把捕获放在 WPF 界面线程上，结果扫码枪的段内间隔 p99 到了 48 毫秒
-//     ——扫码枪根本不可能有这种停顿。原因是 `WM_INPUT` 是投递到消息队列里的，
-//     它的时间戳只能是"消息循环处理到它的时刻"；界面线程每 100 毫秒重建一次
-//     列表控件，消息就排在那些工作后面。低层钩子的回调同样由安装线程的消息
-//     队列驱动，于是两条通道都被拖慢、而且拖慢的程度不同——测出来的时差既不
-//     反映硬件也不反映 Windows，只反映"界面有多卡"。
+//   ★ "只观测"是本类唯一的安全性质，而它由**结构**保证，不靠注释。
 //
-//     所以捕获必须待在一条什么别的事都不干的线程上。
+//     4a 的诊断工具敢在真实生产机上运行，全部理由就是它没有任何一条通向
+//     "吞掉按键"的代码路径。所以这里走的是两个 CreateObserveOnly 工厂：
+//     它们返回的回调恒为放行，且那个 lambda 不接受任何外部输入，调用方
+//     想让它吞掉某个键也无从下手。
 //
-//   ★ 钩子和 Raw Input 必须装在**同一条**线程上。
-//
-//     低层键盘钩子的回调由安装它的线程的消息队列驱动，`WM_INPUT` 也投递到
-//     这条线程的窗口。分在两条线程上就等于给两条通道各配一个不同的调度环境，
-//     它们各自排队、各自被打断——而这里唯一要测的就是两者的时差，混进第二个
-//     调度环境等于在测量对象里掺进噪声。
-//
-//   ★ 线程必须是后台线程。
-//
-//     消息循环是无限阻塞的。若是前台线程，忘记调用 Stop 就会让整个进程退不出去
-//     ——而"程序关掉了但进程还在，钩子还挂着"恰好是规格 §19 要求干净收尾所要
-//     避免的情形。
+//     换成普通构造函数、在这里传一个"永远返回 PassThrough"的 handler，
+//     读起来一样，但那时安全性就变成了"这个调用点恰好没写 Swallow"——
+//     一次重构、一次手滑就没了，而代价是工人的笔记本键盘。
 //
 // English:
-//   A dedicated thread owning the hook, the Raw Input registration, and the message
-//   loop they share.
+//   Task 4a's observing capture: install the hook and Raw Input, record both channels'
+//   events into an observation buffer, and intercept nothing.
 //
-//   This class is a direct product of the first measurement run. With capture on the
-//   WPF UI thread, the scanner's within-burst interval reached a p99 of 48 ms, which no
-//   scanner can produce. WM_INPUT is posted to a message queue and its timestamp can
-//   only be "when the loop reached it", and that thread was rebuilding list controls
-//   every 100 ms. A low-level hook's callback is driven by the same queue, so both
-//   channels slowed by differing amounts — and the resulting delta described neither
-//   the hardware nor Windows, only how sluggish the UI was.
+//   The thread, the message-only window and the message loop are not in this file but in
+//   MessageOnlyCaptureHost, which 4b's interception pipeline shares (see that file and
+//   ICaptureThreadWork). What remains here is the one thing specific to 4a: observing.
 //
-//   The hook and Raw Input must live on the *same* thread. Splitting them gives the two
-//   channels different scheduling environments, each queuing and being interrupted on
-//   its own — and the delta between them is the single thing being measured, so a second
-//   scheduler is noise injected straight into the subject.
+//   "Observes only" is this class's single safety property and it is structural rather than
+//   commented. 4a's diagnostic tool is safe to run on a live production machine for exactly
+//   one reason: it has no code path to swallowing a keystroke. Hence the two CreateObserveOnly
+//   factories, whose callbacks always pass through and whose lambdas take no outside input,
+//   leaving a caller no way to make one swallow a key.
 //
-//   The thread must be a background thread. Its message loop blocks forever, and a
-//   foreground thread would keep the whole process alive if Stop were ever missed —
-//   "the program was closed but the process is still there with the hook installed" being
-//   exactly what spec §19's clean-shutdown requirement exists to prevent.
+//   Using the general constructors with a handler that always returns PassThrough would read
+//   the same, but the safety would then rest on "this call site happens not to say Swallow" —
+//   one refactor or one slip away from gone, at the cost of the operator's laptop keyboard.
 //
 // 包含的成员 / Members in this file:
 //   IsRunning  是否正在捕获
-//   Start      启动线程并等待钩子与窗口就绪
-//   Stop       结束消息循环并等待线程退出
+//   Start      启动捕获并等待就绪
+//   Stop       结束捕获
 //   Dispose    同 Stop
 // =============================================================================
 
 using System.ComponentModel;
-using System.Diagnostics;
-using System.Runtime.InteropServices;
-using ScannerHelper.Win32.Native;
 using ScannerHelper.Win32.Observation;
 
 namespace ScannerHelper.Win32;
 
 /// <summary>
-/// 中文：独占输入捕获的专用线程。
-/// English: The dedicated thread that owns input capture.
+/// 中文：Task 4a 的观测捕获。只记录，不拦截。
+/// English: Task 4a's observing capture. Records, never intercepts.
 /// </summary>
-public sealed class InputCaptureThread : IDisposable
+public sealed class InputCaptureThread : ICaptureThreadWork, IDisposable
 {
-    /// <summary>
-    /// 中文：等待线程退出的上限。超时就不再等——诊断工具卡在关闭流程里，
-    ///       比残留一条后台线程糟得多；而线程是后台线程，进程退出时会被回收。
-    /// English: How long to wait for the thread to exit. Past that, stop waiting: a
-    ///          diagnostic tool hanging on shutdown is worse than a lingering background
-    ///          thread, and a background thread is reclaimed when the process exits.
-    /// </summary>
-    private static readonly TimeSpan ShutdownTimeout = TimeSpan.FromSeconds(2);
-
     private readonly ObservationBuffer _buffer;
-
-    /// <summary>
-    /// 中文：窗口类名带一个唯一后缀。同一进程内注册两次同名窗口类会失败，
-    ///       而"停止后再开始"是这个工具的常规操作。
-    /// English: The window class name carries a unique suffix. Registering the same
-    ///          class name twice in one process fails, and stop-then-start again is
-    ///          ordinary use of this tool.
-    /// </summary>
-    private readonly string _windowClassName =
-        $"ScannerHelperInputCapture_{Guid.NewGuid():N}";
-
-    /// <summary>
-    /// 中文：线程启动完成（成功或失败）的信号。Start 必须等它——否则调用方
-    ///       会在钩子还没装上时就以为捕获已经开始，而最初那几次按键会静静丢掉。
-    /// English: Signals that startup finished, successfully or not. Start must wait on
-    ///          it, or the caller believes capture began while the hook is not yet
-    ///          installed and the first keystrokes vanish silently.
-    /// </summary>
-    private readonly ManualResetEventSlim _startupCompleted = new(initialState: false);
-
-    private Thread? _captureThread;
-    private uint _captureThreadId;
-    private IntPtr _windowHandle;
-    private ushort _windowClassAtom;
-    private Exception? _startupFailure;
-
-    /// <summary>
-    /// 中文：窗口过程委托。必须持有，理由同钩子回调——窗口类里存的是函数指针。
-    /// English: The window procedure delegate, held for the same reason as the hook
-    ///          callback: the window class stores a function pointer.
-    /// </summary>
-    private WindowNative.WindowProcedure? _windowProcedure;
+    private readonly MessageOnlyCaptureHost _host;
 
     private LowLevelKeyboardHook? _hook;
     private RawInputKeyboardListener? _rawInput;
 
     /// <summary>
     /// 中文：
-    ///   构造捕获线程。此时不启动，调用 <see cref="Start"/> 才开始。
+    ///   构造捕获。此时不启动，调用 <see cref="Start"/> 才开始。
     ///   输入：buffer 观测事件的去处，不得为 null。
     /// English:
-    ///   Creates the capture thread without starting it; <see cref="Start"/> does that.
+    ///   Creates the capture without starting it; <see cref="Start"/> does that.
     /// </summary>
     /// <exception cref="ArgumentNullException">
     /// 中文：buffer 为 null。 English: buffer is null.
@@ -130,319 +75,109 @@ public sealed class InputCaptureThread : IDisposable
     public InputCaptureThread(ObservationBuffer buffer)
     {
         ArgumentNullException.ThrowIfNull(buffer);
+
         _buffer = buffer;
+        _host = new MessageOnlyCaptureHost(this, "ScannerHelper input capture");
     }
 
     /// <summary>
     /// 中文：是否正在捕获。
     /// English: Whether capture is running.
     /// </summary>
-    public bool IsRunning { get; private set; }
+    public bool IsRunning => _host.IsRunning;
 
     /// <summary>
     /// 中文：
-    ///   启动捕获线程，并**阻塞等待**窗口与钩子就绪。
-    ///   输入：无。输出：无。
-    ///   步骤：
-    ///     1. 起一条后台线程跑 <see cref="RunCaptureLoop"/>；
-    ///     2. 等待启动完成信号；
-    ///     3. 启动过程中出过错就把原始异常重新抛出。
+    ///   观测不需要周期性推进，因此不装定时器。
     ///
-    ///   步骤 2 的等待是必需的。不等的话，调用方会在钩子尚未装上时就认为
-    ///   捕获已经开始，而这段空窗期里的按键会静静丢失——而且丢得毫无征兆，
-    ///   排查时只会看到"最开始几个字符没记上"。
-    ///
-    ///   步骤 3 保留原始异常而不是包一层：安装失败最常见的原因是权限不匹配
-    ///   （规格 §2.1 假设 A2），那条 Win32 错误信息本身就是最有用的线索，
-    ///   包装成"启动失败"只会把它盖掉。
+    ///   4a 只把事件记下来，配对与统计都在事后离线做（见 ChannelPairing）。
+    ///   需要定时器的是 4b：被扣留的按键必须有人在"什么都不再发生"的时候
+    ///   把它放出来，而那一刻没有任何事件可以触发检查。
     /// English:
-    ///   Starts the capture thread and blocks until the window and hook are ready.
-    ///   Steps: (1) start a background thread running the loop; (2) wait for the startup
-    ///   signal; (3) rethrow the original exception if startup failed.
+    ///   Observation needs no periodic advance, so no timer is started.
     ///
-    ///   The wait in step 2 is required. Without it the caller believes capture began
-    ///   while the hook is not yet installed, and keystrokes in that gap vanish without
-    ///   a trace — presenting later as "the first few characters were not recorded".
-    ///
-    ///   Step 3 preserves the original exception rather than wrapping it: the usual
-    ///   cause is a privilege mismatch (spec §2.1, assumption A2), and that Win32
-    ///   message is the most useful clue there is.
+    ///   4a only records; pairing and statistics happen offline afterwards (see
+    ///   ChannelPairing). The timer is 4b's need: a withheld keystroke must be released by
+    ///   someone at the moment nothing is happening any more, and then no event exists to
+    ///   trigger the check.
+    /// </summary>
+    TimeSpan ICaptureThreadWork.TickInterval => TimeSpan.Zero;
+
+    /// <summary>
+    /// 中文：
+    ///   启动捕获，阻塞等待窗口与钩子就绪。
+    ///   启动失败时抛出的是原始异常——最常见的原因是权限不匹配
+    ///   （规格 §2.1 假设 A2），那条 Win32 错误信息本身就是最有用的线索。
+    /// English:
+    ///   Starts capture, blocking until the window and hook are ready. A startup failure
+    ///   throws the original exception; the usual cause is a privilege mismatch (spec §2.1,
+    ///   assumption A2) and that Win32 message is the most useful clue there is.
     /// </summary>
     /// <exception cref="Win32Exception">
     /// 中文：窗口创建、Raw Input 注册或钩子安装失败。
     /// English: Creating the window, registering Raw Input, or installing the hook failed.
     /// </exception>
-    public void Start()
-    {
-        if (IsRunning)
-        {
-            return;
-        }
+    public void Start() => _host.Start();
 
-        _startupFailure = null;
-        _startupCompleted.Reset();
+    /// <summary>
+    /// 中文：结束捕获。
+    /// English: Ends capture.
+    /// </summary>
+    public void Stop() => _host.Stop();
 
-        // 步骤 1 / Step 1
-        _captureThread = new Thread(RunCaptureLoop)
-        {
-            IsBackground = true,
-            Name = "ScannerHelper input capture",
-        };
-        _captureThread.Start();
-
-        // 步骤 2 / Step 2
-        _startupCompleted.Wait();
-
-        // 步骤 3 / Step 3
-        if (_startupFailure is not null)
-        {
-            _captureThread = null;
-            throw _startupFailure;
-        }
-
-        IsRunning = true;
-    }
+    /// <inheritdoc />
+    public void Dispose() => _host.Dispose();
 
     /// <summary>
     /// 中文：
-    ///   结束捕获。
-    ///   输入：无。输出：无。
-    ///   步骤：
-    ///     1. 向捕获线程投递 WM_QUIT，让消息循环自然退出；
-    ///     2. 等待线程结束，最多等 <see cref="ShutdownTimeout"/>。
+    ///   在捕获线程上装好两条通道。
+    ///   顺序有意为之：**先注册 Raw Input，再安装钩子**。
     ///
-    ///   摘钩子、销毁窗口、注销窗口类都在捕获线程自己那一侧做（见
-    ///   <see cref="RunCaptureLoop"/>）。这不是风格问题：钩子必须由**安装它的
-    ///   那条线程**卸载，窗口也必须由创建它的线程销毁，从别的线程调用会失败。
+    ///   反过来的话，在 Raw Input 注册完成之前那一小段时间里钩子已经在记事件，
+    ///   而这些事件永远等不到对家，会全部堆成"未配对"——把一个本该为零、
+    ///   一旦不为零就该警觉的指标从一开始就掺进噪声。
     /// English:
-    ///   Ends capture.
-    ///   Steps: (1) post WM_QUIT so the message loop exits on its own; (2) join, up to
-    ///   <see cref="ShutdownTimeout"/>.
+    ///   Installs both channels on the capture thread, Raw Input first and the hook second.
     ///
-    ///   Unhooking, destroying the window and unregistering the class all happen on the
-    ///   capture thread itself. Not a stylistic choice: a hook must be removed by the
-    ///   thread that installed it and a window destroyed by the thread that created it;
-    ///   calling from elsewhere fails.
+    ///   The other order leaves a window in which the hook records events that can never find
+    ///   a counterpart, and those pile up as "unpaired" — seeding noise into a metric that
+    ///   should read zero and be alarming when it does not.
     /// </summary>
-    public void Stop()
+    void ICaptureThreadWork.OnCaptureStarted(IntPtr windowHandle)
     {
-        if (!IsRunning)
-        {
-            return;
-        }
+        _rawInput = RawInputKeyboardListener.CreateObserveOnly(_buffer);
+        _rawInput.Register(windowHandle);
 
-        // 步骤 1 / Step 1
-        WindowNative.PostThreadMessageW(_captureThreadId, WindowNative.WM_QUIT, IntPtr.Zero, IntPtr.Zero);
-
-        // 步骤 2 / Step 2
-        _captureThread?.Join(ShutdownTimeout);
-        _captureThread = null;
-        IsRunning = false;
+        _hook = LowLevelKeyboardHook.CreateObserveOnly(_buffer);
+        _hook.Install();
     }
 
     /// <inheritdoc />
-    public void Dispose()
+    void ICaptureThreadWork.OnRawInputMessage(IntPtr rawInputHandle, long timestamp)
+        => _rawInput?.HandleRawInput(rawInputHandle, timestamp);
+
+    /// <summary>
+    /// 中文：观测不装定时器，本方法不会被调用。
+    /// English: Observation starts no timer, so this is never called.
+    /// </summary>
+    void ICaptureThreadWork.OnTick()
     {
-        Stop();
-        _startupCompleted.Dispose();
     }
 
     /// <summary>
     /// 中文：
-    ///   捕获线程的主体。
-    ///   步骤：
-    ///     1. 记下线程 id，供 Stop 投递 WM_QUIT；
-    ///     2. 注册窗口类并创建仅消息窗口；
-    ///     3. 先注册 Raw Input，再安装钩子；
-    ///     4. 无论成败都置起启动完成信号，放 Start 继续；
-    ///     5. 跑消息循环，直到收到 WM_QUIT；
-    ///     6. 在本线程上依次摘钩子、销毁窗口、注销窗口类。
-    ///
-    ///   步骤 3 的先后有意为之：先装钩子的话，在 Raw Input 注册完成之前那一小段
-    ///   时间里钩子已经在记事件，而这些事件永远等不到对家，会全部堆成"未配对"
-    ///   ——把一个本该为零、一旦不为零就该警觉的指标从一开始就掺进噪声。
-    ///
-    ///   步骤 4 必须在 finally 之外、且失败路径上也要执行，否则一旦启动失败，
-    ///   Start 会永远阻塞在等待上——诊断工具变成一个卡死的窗口，比报错糟得多。
+    ///   在捕获线程上摘掉两条通道。先摘钩子：它影响全系统的每一次按键，
+    ///   最该先停。
     /// English:
-    ///   The capture thread's body.
-    ///   Steps: (1) record the thread id for Stop to post WM_QUIT to; (2) register the
-    ///   class and create the message-only window; (3) register Raw Input, then install
-    ///   the hook; (4) signal startup complete either way, releasing Start; (5) pump
-    ///   until WM_QUIT; (6) unhook, destroy the window and unregister the class, all on
-    ///   this thread.
-    ///
-    ///   The order in step 3 is deliberate: installing the hook first leaves a window in
-    ///   which it records events that can never find a counterpart, and those pile up as
-    ///   "unpaired", seeding noise into a metric that should read zero and be alarming
-    ///   when it does not.
-    ///
-    ///   Step 4 must also run on the failure path, or a failed startup leaves Start
-    ///   blocked forever — turning the diagnostic tool into a frozen window, which is
-    ///   considerably worse than an error message.
+    ///   Removes both channels on the capture thread, the hook first: it affects every
+    ///   keystroke on the machine and should stop soonest.
     /// </summary>
-    private void RunCaptureLoop()
-    {
-        // 步骤 1 / Step 1
-        _captureThreadId = WindowNative.GetCurrentThreadId();
-
-        try
-        {
-            // 步骤 2 / Step 2
-            CreateMessageOnlyWindow();
-
-            // 步骤 3 / Step 3
-            _rawInput = new RawInputKeyboardListener(_buffer);
-            _rawInput.Register(_windowHandle);
-
-            // ★ 走 CreateObserveOnly 而不是普通构造函数：4a 的安全性质
-            //   （没有任何一条通向吞掉的代码路径）因此是结构上成立的，
-            //   而不是靠"这里恰好没返回 Swallow"。这个工具会在真实工作机上跑。
-            // Through CreateObserveOnly rather than the general constructor: 4a's safety property
-            // — no code path to swallowing at all — is then structural rather than resting on
-            // "this call site happens not to return Swallow". This tool runs on live machines.
-            _hook = LowLevelKeyboardHook.CreateObserveOnly(_buffer);
-            _hook.Install();
-        }
-        catch (Exception startupException)
-        {
-            _startupFailure = startupException;
-            CleanUp();
-
-            // 步骤 4 / Step 4（失败路径也必须放行 Start）
-            _startupCompleted.Set();
-            return;
-        }
-
-        // 步骤 4 / Step 4
-        _startupCompleted.Set();
-
-        // 步骤 5 / Step 5
-        while (WindowNative.GetMessageW(out var message, IntPtr.Zero, 0, 0) > 0)
-        {
-            WindowNative.DispatchMessageW(ref message);
-        }
-
-        // 步骤 6 / Step 6
-        CleanUp();
-    }
-
-    /// <summary>
-    /// 中文：
-    ///   注册窗口类并创建仅消息窗口。
-    ///
-    ///   父窗口传 HWND_MESSAGE 就得到一个仅消息窗口：不显示、不被枚举、
-    ///   收不到广播消息，只接收发给它的消息。这正是接收 `WM_INPUT` 所需要的
-    ///   全部功能，也避免了一个不该出现在任务栏里的窗口。
-    /// English:
-    ///   Registers the class and creates the message-only window. Passing HWND_MESSAGE
-    ///   as the parent yields a window that is invisible, not enumerated and receives no
-    ///   broadcasts — everything receiving WM_INPUT needs, and nothing that would put a
-    ///   stray window in the taskbar.
-    /// </summary>
-    private void CreateMessageOnlyWindow()
-    {
-        _windowProcedure = OnWindowMessage;
-
-        var windowClass = new WindowNative.WNDCLASSEXW
-        {
-            cbSize = (uint)Marshal.SizeOf<WindowNative.WNDCLASSEXW>(),
-            lpfnWndProc = _windowProcedure,
-            hInstance = NativeMethods.GetCurrentModuleHandle(),
-            lpszClassName = _windowClassName,
-        };
-
-        _windowClassAtom = WindowNative.RegisterClassExW(ref windowClass);
-        if (_windowClassAtom == 0)
-        {
-            throw new Win32Exception(
-                Marshal.GetLastWin32Error(),
-                "注册仅消息窗口的窗口类失败。 Failed to register the message-only window class.");
-        }
-
-        _windowHandle = WindowNative.CreateWindowExW(
-            0, _windowClassName, null, 0, 0, 0, 0, 0,
-            WindowNative.HWND_MESSAGE, IntPtr.Zero, windowClass.hInstance, IntPtr.Zero);
-
-        if (_windowHandle == IntPtr.Zero)
-        {
-            throw new Win32Exception(
-                Marshal.GetLastWin32Error(),
-                "创建仅消息窗口失败。 Failed to create the message-only window.");
-        }
-    }
-
-    /// <summary>
-    /// 中文：
-    ///   仅消息窗口的窗口过程。
-    ///
-    ///   ★ 只做一件事：认出 `WM_INPUT`，**立刻**取时间戳，交给解析器。
-    ///
-    ///     时间戳必须是认出消息之后的第一条语句。整个 4a 要测的就是两条通道的
-    ///     时差，那个差值可能只有一百多微秒；时间戳每晚一步，测出来的就多混进
-    ///     一分我们自己代码的耗时。
-    ///
-    ///     这条线程上没有任何别的工作，正是为了让"消息何时被取到"尽可能贴近
-    ///     "消息何时到达"。
-    /// English:
-    ///   The message-only window's procedure. It does one thing: recognize WM_INPUT,
-    ///   take a timestamp immediately, and hand the payload to the parser.
-    ///
-    ///   The timestamp must be the first statement after recognition. The delta 4a
-    ///   measures may be only a hundred-odd microseconds, and every step taken before
-    ///   the timestamp folds more of our own cost into it. This thread does nothing else
-    ///   precisely so that "when the message was retrieved" sits as close as possible to
-    ///   "when the message arrived".
-    /// </summary>
-    private IntPtr OnWindowMessage(IntPtr windowHandle, uint message, IntPtr wParam, IntPtr lParam)
-    {
-        if (message == NativeMethods.WM_INPUT)
-        {
-            var timestamp = Stopwatch.GetTimestamp();
-            _rawInput?.HandleRawInput(lParam, timestamp);
-            return IntPtr.Zero;
-        }
-
-        return WindowNative.DefWindowProcW(windowHandle, message, wParam, lParam);
-    }
-
-    /// <summary>
-    /// 中文：
-    ///   在捕获线程上释放全部原生资源。
-    ///   顺序：先摘钩子（它影响全系统的每一次按键，最该先停），再销毁窗口，
-    ///   最后注销窗口类。
-    ///
-    ///   每一步都独立地容错：其中一步失败不该阻止后面几步——残留一个窗口类
-    ///   只是浪费一点资源，残留一个钩子却会继续拖慢整台机器的键盘。
-    /// English:
-    ///   Releases every native resource, on the capture thread. Order: unhook first
-    ///   since it affects every keystroke system-wide, then destroy the window, then
-    ///   unregister the class.
-    ///
-    ///   Each step tolerates its own failure so one cannot block the rest: a leaked
-    ///   window class merely wastes a little memory, whereas a leaked hook keeps slowing
-    ///   the entire machine's keyboard.
-    /// </summary>
-    private void CleanUp()
+    void ICaptureThreadWork.OnCaptureStopping()
     {
         _hook?.Dispose();
         _hook = null;
 
         _rawInput?.Dispose();
         _rawInput = null;
-
-        if (_windowHandle != IntPtr.Zero)
-        {
-            WindowNative.DestroyWindow(_windowHandle);
-            _windowHandle = IntPtr.Zero;
-        }
-
-        if (_windowClassAtom != 0)
-        {
-            WindowNative.UnregisterClassW(_windowClassName, NativeMethods.GetCurrentModuleHandle());
-            _windowClassAtom = 0;
-        }
-
-        _windowProcedure = null;
     }
 }

@@ -186,4 +186,42 @@ internal static class WindowNative
 
     [DllImport("kernel32.dll")]
     internal static extern uint GetCurrentThreadId();
+
+    /// <summary>
+    /// 中文：
+    ///   给窗口装一个定时器，到点投递 WM_TIMER。
+    ///
+    ///   ★ 用它而不是 System.Threading.Timer，是因为回调必须落在**捕获线程
+    ///     自己**身上。关联超时的清理会释放被扣留的按键，而释放要调 SendInput；
+    ///     扫描超时的处理还会走解析与输出。这些都触碰捕获线程独有的状态
+    ///     （解码器的按键状态、关联器的待配对队列），从别的线程进来就是数据竞争。
+    ///
+    ///     WM_TIMER 由这条线程自己的消息循环取出，天然串行化，不需要任何锁——
+    ///     而锁恰恰是钩子回调路径上最不能有的东西（规格 §19）。
+    /// English:
+    ///   Attaches a timer to a window, posting WM_TIMER when it elapses.
+    ///
+    ///   Used rather than System.Threading.Timer because the callback must land on the capture
+    ///   thread itself. Correlation expiry releases withheld keystrokes, which calls SendInput,
+    ///   and scan expiry runs parsing and output. All of it touches state private to the capture
+    ///   thread — the decoder's key state, the correlator's pending queues — and arriving from
+    ///   another thread would be a data race.
+    ///
+    ///   WM_TIMER is retrieved by this thread's own message loop and is therefore serialized by
+    ///   construction, needing no lock — and a lock is the one thing that must never appear on
+    ///   the hook callback path (spec §19).
+    /// </summary>
+    [DllImport("user32.dll", SetLastError = true)]
+    internal static extern nuint SetTimer(
+        IntPtr windowHandle, nuint timerId, uint intervalMilliseconds, IntPtr callback);
+
+    [DllImport("user32.dll", SetLastError = true)]
+    [return: MarshalAs(UnmanagedType.Bool)]
+    internal static extern bool KillTimer(IntPtr windowHandle, nuint timerId);
+
+    /// <summary>
+    /// 中文：定时器到点的消息号。
+    /// English: The message a timer posts when it elapses.
+    /// </summary>
+    internal const uint WM_TIMER = 0x0113;
 }

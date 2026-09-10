@@ -62,12 +62,30 @@ using ScannerHelper.Win32.Observation;
 namespace ScannerHelper.Win32;
 
 /// <summary>
+/// 中文：
+///   处理一条已解析出来的原始输入事件。
+///
+///   ★ 没有返回值，这不是省略。Raw Input 是**投递**来的通知，事件早已被
+///     Windows 送达焦点程序，这里无论做什么都拦不住它。能拦的只有钩子
+///     （见 <see cref="HookDecision"/>）。两者的签名不同，正是为了让这个
+///     差别在类型上就看得见，而不是靠记住。
+/// English:
+///   Handles one decoded raw-input event.
+///
+///   It returns nothing, which is not an omission: raw input is a *posted* notification and
+///   the event has already been delivered to the focused application, so nothing done here
+///   can stop it. Only the hook can (see <see cref="HookDecision"/>). The two signatures
+///   differ precisely so that the distinction is visible in the types rather than remembered.
+/// </summary>
+public delegate void RawInputEventHandler(in ObservedInputEvent observedEvent);
+
+/// <summary>
 /// 中文：接收并解析键盘类原始输入。
 /// English: Receives and decodes keyboard raw input.
 /// </summary>
 public sealed class RawInputKeyboardListener : IDisposable
 {
-    private readonly ObservationBuffer _buffer;
+    private readonly RawInputEventHandler _handler;
 
     /// <summary>
     /// 中文：
@@ -107,21 +125,56 @@ public sealed class RawInputKeyboardListener : IDisposable
     /// <summary>
     /// 中文：
     ///   构造监听器。此时并不注册，注册请调用 <see cref="Register"/>。
-    ///   输入：buffer 观测事件的去处，不得为 null。
+    ///   输入：handler 每条解析出来的事件的去处，不得为 null。
     /// English:
     ///   Creates the listener without registering; call <see cref="Register"/> for
-    ///   that. buffer is where observed events go and must not be null.
+    ///   that. handler receives every decoded event and must not be null.
+    /// </summary>
+    /// <exception cref="ArgumentNullException">
+    /// 中文：handler 为 null。 English: handler is null.
+    /// </exception>
+    public RawInputKeyboardListener(RawInputEventHandler handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+
+        _handler = handler;
+        _payloadBufferSize = Marshal.SizeOf<RawInputNative.RAWINPUTKEYBOARD>();
+        _payloadBuffer = Marshal.AllocHGlobal(_payloadBufferSize);
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   构造一个只把事件写进观测缓冲区的监听器，供 Task 4a 的诊断工具使用。
+    ///   输入：buffer 观测事件的去处，不得为 null。
+    ///   输出：监听器。
+    ///
+    ///   与钩子那边的 <see cref="LowLevelKeyboardHook.CreateObserveOnly"/> 同理：
+    ///   4a 的工具要在真实工作机上跑，它"只观测"这件事应当由结构保证。这里的
+    ///   lambda 只写缓冲区、不接受任何外部输入，调用方无从让它做别的事。
+    ///
+    ///   （Raw Input 通道本来就吞不掉任何东西，所以这个工厂的意义不在安全，
+    ///   而在于让两条通道的构造方式对称、读起来是同一个故事。）
+    /// English:
+    ///   Creates a listener that only records into an observation buffer, for Task 4a's
+    ///   diagnostic tool.
+    ///
+    ///   The same idea as <see cref="LowLevelKeyboardHook.CreateObserveOnly"/> on the hook
+    ///   side: 4a's tool runs on live machines and "observes only" should be structural. The
+    ///   lambda here writes to the buffer and takes no outside input, leaving a caller no way
+    ///   to make it do anything else.
+    ///
+    ///   (The Raw Input channel cannot swallow anything in any case, so this factory's value
+    ///   is not safety but symmetry — the two channels then read as the same story.)
     /// </summary>
     /// <exception cref="ArgumentNullException">
     /// 中文：buffer 为 null。 English: buffer is null.
     /// </exception>
-    public RawInputKeyboardListener(ObservationBuffer buffer)
+    public static RawInputKeyboardListener CreateObserveOnly(ObservationBuffer buffer)
     {
         ArgumentNullException.ThrowIfNull(buffer);
 
-        _buffer = buffer;
-        _payloadBufferSize = Marshal.SizeOf<RawInputNative.RAWINPUTKEYBOARD>();
-        _payloadBuffer = Marshal.AllocHGlobal(_payloadBufferSize);
+        return new RawInputKeyboardListener((in ObservedInputEvent observedEvent) =>
+            buffer.Write(observedEvent));
     }
 
     /// <summary>
@@ -185,12 +238,12 @@ public sealed class RawInputKeyboardListener : IDisposable
     ///   处理一条 WM_INPUT。
     ///   输入：rawInputHandle 消息的 lParam；timestamp 调用方在窗口过程**最开头**
     ///         取得的 Stopwatch.GetTimestamp 读数。
-    ///   输出：成功记录一个键盘事件返回 true；不是键盘输入或读取失败返回 false。
+    ///   输出：成功交出一个键盘事件返回 true；不是键盘输入或读取失败返回 false。
     ///   步骤：
     ///     1. 取出原始输入负载；失败则放弃这一条；
     ///     2. 不是键盘类型就忽略；
     ///     3. 过滤掉设备用来占位的伪键（扫描码或虚拟键为 0xFF）；
-    ///     4. 写入观测缓冲区。
+    ///     4. 交给 handler。
     ///
     ///   ★ 时间戳由**调用方**传入，而不是在本方法里取。
     ///     它必须是窗口过程处理这条消息时做的第一件事——在本方法里取的话，
@@ -205,10 +258,10 @@ public sealed class RawInputKeyboardListener : IDisposable
     /// English:
     ///   Handles one WM_INPUT. timestamp is the caller's Stopwatch.GetTimestamp
     ///   reading, taken at the very top of the window procedure. Returns true when a
-    ///   keyboard event was recorded.
+    ///   keyboard event was handed on.
     ///   Steps: (1) read the payload, abandoning the message on failure; (2) ignore
     ///   non-keyboard input; (3) filter out placeholder keys (scan code or virtual key
-    ///   0xFF); (4) record it.
+    ///   0xFF); (4) hand it to the handler.
     ///
     ///   The timestamp comes from the caller rather than being taken here. It has to be
     ///   the first thing the window procedure does: taken inside this method, the
@@ -253,7 +306,7 @@ public sealed class RawInputKeyboardListener : IDisposable
         }
 
         // 步骤 4 / Step 4
-        _buffer.Write(new ObservedInputEvent(
+        _handler(new ObservedInputEvent(
             Channel: InputChannel.RawInput,
             Timestamp: timestamp,
             VirtualKey: rawInput.keyboard.VKey,
