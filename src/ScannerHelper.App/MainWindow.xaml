@@ -50,6 +50,7 @@
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
                 <!--
@@ -62,7 +63,32 @@
                 <Button x:Name="PauseButton" Grid.Column="0" HorizontalAlignment="Left"
                         Style="{StaticResource ActionButton}" Click="OnPauseClicked" />
 
-                <Button x:Name="SettingsButton" Grid.Column="1" HorizontalAlignment="Right"
+                <!--
+                    中文：
+                      置顶开关（规格 §11.4）。
+
+                      ★ 只管 Full 窗口。Compact 是**强制**置顶的——它小得不挡事，
+                        而它存在的全部意义就是"抬眼就能看到现在是什么模式"，
+                        被业务软件盖住的置顶窗口等于没有。所以那边没有这个开关。
+
+                      ★ 从 Compact 回到 Full 时，要恢复工人**在 Full 上**的偏好，
+                        而不是把 Compact 的强制置顶带回来（规格 §11.4 明写这一条）。
+                    English:
+                      The always-on-top switch (spec §11.4). It governs the Full window only:
+                      Compact forces topmost, because it is small enough not to be in the way and
+                      its entire purpose is that a glance shows the mode — a topmost window covered
+                      by the business application would be no window at all. Hence no switch there.
+
+                      Returning from Compact to Full restores the operator's preference for Full
+                      rather than carrying Compact's forced topmost back with it, which spec §11.4
+                      states explicitly.
+                -->
+                <ToggleButton x:Name="PinButton" Grid.Column="1" HorizontalAlignment="Right"
+                              Height="38" MinWidth="120" FontSize="14" Padding="14,0"
+                              Margin="0,0,8,0"
+                              Checked="OnPinChanged" Unchecked="OnPinChanged" />
+
+                <Button x:Name="SettingsButton" Grid.Column="2" HorizontalAlignment="Right"
                         Style="{StaticResource ActionButton}" Click="OnSettingsClicked"
                         Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[Settings]}" />
             </Grid>

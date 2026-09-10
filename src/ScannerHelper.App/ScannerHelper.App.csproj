@@ -30,6 +30,43 @@
     <Nullable>enable</Nullable>
     <UseWPF>true</UseWPF>
 
+    <!--
+      中文：
+        托盘图标用的是 WinForms 的 NotifyIcon（规格 §11.9）。
+
+        ★ 这**不引入外部依赖**：WinForms 是 .NET 桌面运行时自带的，与 WPF 同一个
+          运行时。仓库 IT 按哈希把可执行文件加进白名单（规格 §22.1），关键是不新增
+          要下载的东西，而不是不引用框架里已有的程序集。
+
+          自己写 Shell_NotifyIcon 还要处理图标句柄、以及 explorer.exe 崩溃重启后
+          托盘图标消失（TaskbarCreated 消息）等一堆细节，NotifyIcon 都已经处理好了。
+      English:
+        The tray icon uses WinForms' NotifyIcon (spec §11.9). This adds no external dependency:
+        WinForms ships in the same .NET desktop runtime as WPF. Warehouse IT allow-lists the
+        executable by hash (spec §22.1), and what matters is adding nothing to download rather than
+        avoiding assemblies already in the framework. Writing Shell_NotifyIcon by hand would also
+        mean handling icon handles and the tray icon vanishing when explorer.exe restarts (the
+        TaskbarCreated message), all of which NotifyIcon already handles.
+    -->
+    <UseWindowsForms>true</UseWindowsForms>
+
+    <!--
+      中文：
+        关掉 WinForms 的高 DPI 分析器（WFAC010）。
+
+        ★ 它要求"把 DPI 设置从清单里移到 Application.SetHighDpiMode"，那是给纯
+          WinForms 程序的建议。本程序是 WPF，DPI 必须由**清单**声明（规格 §18
+          要求支持 100/125/150% 缩放）——WinForms 只是用来画一个托盘图标，
+          让它来决定整个程序的 DPI 模式是本末倒置。
+      English:
+        Disables WinForms' high-DPI analyzer (WFAC010), whose advice — move the DPI setting out of
+        the manifest into Application.SetHighDpiMode — is meant for pure WinForms applications.
+        This is a WPF program whose DPI awareness must be declared in the manifest (spec §18
+        requires 100/125/150% scaling); WinForms is here only to draw a tray icon, and letting it
+        decide the whole program's DPI mode would invert the two.
+    -->
+    <NoWarn>$(NoWarn);WFAC010</NoWarn>
+
     <AssemblyName>ScannerHelper</AssemblyName>
     <RootNamespace>ScannerHelper.App</RootNamespace>
 
@@ -42,6 +79,30 @@
     -->
     <InvariantGlobalization>false</InvariantGlobalization>
   </PropertyGroup>
+
+  <ItemGroup>
+    <!--
+      中文：
+        去掉 WinForms 的**全局 using**。
+
+        ★ UseWindowsForms 会隐式给每个文件加上 using System.Windows.Forms，于是
+          Application、MessageBox、Clipboard 这些名字同时来自 WPF 和 WinForms，
+          编译器报歧义——而更坏的情况是它**不报**歧义、悄悄选中了 WinForms 的
+          那一个：WinForms 的 MessageBox 在 WPF 程序里不认 Owner，弹出来的框
+          可能跑到别的窗口后面去，工人看到的是"程序卡住了"。
+
+          需要 WinForms 的只有托盘那一个文件，让它自己写 using 就够了。
+      English:
+        Removes WinForms' global using. UseWindowsForms implicitly adds
+        using System.Windows.Forms to every file, so Application, MessageBox and Clipboard come
+        from both WPF and WinForms and the compiler reports an ambiguity — and worse is when it
+        does not, quietly picking WinForms': its MessageBox ignores an Owner in a WPF app and can
+        appear behind another window, which the operator reads as "the program froze". Only the
+        tray file needs WinForms, and it can write its own using.
+    -->
+    <Using Remove="System.Windows.Forms" />
+    <Using Remove="System.Drawing" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ScannerHelper.Core\ScannerHelper.Core.csproj" />

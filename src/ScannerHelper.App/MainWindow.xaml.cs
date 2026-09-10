@@ -89,6 +89,17 @@ public partial class MainWindow : Window
     private CompactWindow? _compactWindow;
     private bool _exitConfirmed;
     private bool _isToggleHotkeyAvailable = true;
+    private bool _isRestoringPin;
+
+    /// <summary>
+    /// 中文：
+    ///   托盘图标（规格 §11.9）。它是**第二块状态显示**，不是第二个隐藏处——
+    ///   菜单里没有"最小化到托盘"，理由见 TrayIcon 的文件头。
+    /// English:
+    ///   The tray icon (spec §11.9): a second status display rather than a second place to hide.
+    ///   Its menu has no "minimize to tray"; see TrayIcon's header.
+    /// </summary>
+    private readonly TrayIcon? _trayIcon;
 
     /// <summary>
     /// 中文：构造窗口并接上会话。
@@ -106,6 +117,18 @@ public partial class MainWindow : Window
             session.ErrorRaised += OnSessionErrorRaised;
         }
 
+        // ★ 置顶偏好在**订阅刷新之前**恢复，因为设置 IsChecked 会触发 Checked 事件，
+        //   而那个处理器要写回设置——载入期间写回等于把工人的偏好覆盖成默认值。
+        //   用 _isRestoringPin 挡住那一次。
+        // The topmost preference is restored before anything else subscribes, because assigning
+        // IsChecked raises Checked and that handler writes the setting back — writing during load
+        // would overwrite the operator's preference with the default. _isRestoringPin blocks that
+        // one call.
+        _isRestoringPin = true;
+        PinButton.IsChecked = CurrentApp.Settings.FullWindowAlwaysOnTop;
+        Topmost = CurrentApp.Settings.FullWindowAlwaysOnTop;
+        _isRestoringPin = false;
+
         Localizer.LanguageChanged += (_, _) => Refresh();
 
         // ★ 热键注册不上不该让程序起不来：注册失败是常态（别的程序占着），
@@ -121,6 +144,32 @@ public partial class MainWindow : Window
         catch (System.ComponentModel.Win32Exception)
         {
             _hotkeys = null;
+        }
+
+        // 托盘建不起来不该让程序起不来：那只是少了一块次要的状态显示，
+        // 而主界面才是主通道（规格 §11.9 也明说 V1 可以没有它）。
+        // A tray icon that cannot be created must not stop the program: it is only a secondary
+        // status display, the main window being the primary channel — and spec §11.9 says V1 may
+        // omit it entirely.
+        try
+        {
+            _trayIcon = new TrayIcon();
+            _trayIcon.ShowRequested += (_, _) => BringToFront();
+            _trayIcon.PauseToggleRequested += (_, _) => TogglePause();
+            _trayIcon.SettingsRequested += (_, _) =>
+            {
+                BringToFront();
+                OpenSettings();
+            };
+            _trayIcon.ExitRequested += (_, _) =>
+            {
+                BringToFront();
+                Close();
+            };
+        }
+        catch (Exception)
+        {
+            _trayIcon = null;
         }
 
         if (Session is { } soundSession)
@@ -381,6 +430,8 @@ public partial class MainWindow : Window
         // The Pause button is always clickable. It is the safety valve (spec §5.7), and a valve
         // that greys out in some states makes the operator first work out whether it can be
         // pressed — at precisely the moment least suited to working anything out.
+        PinButton.Content = strings[PinButton.IsChecked == true ? "Unpin" : "Pin"];
+
         PauseButton.Content = strings[snapshot.IsPaused ? "Resume" : "Pause"];
 
         ConnectionText.Text = snapshot.IsConnected
@@ -394,6 +445,7 @@ public partial class MainWindow : Window
             : strings["NoScanYet"];
 
         UpdateLinkWarning(snapshot);
+        _trayIcon?.Update(snapshot);
 
         // 候选端口：置信度不够自动连，但工人点一下就能确认（见 ScannerSession.Tick）。
         // A suggested port: not confident enough to connect automatically, but one click from the
@@ -453,9 +505,37 @@ public partial class MainWindow : Window
     private static string ModeLabel(ScanMode mode, LocalizedStrings strings)
         => strings[mode == ScanMode.Sn ? "ModeSn" : "ModeSku"];
 
+    /// <summary>
+    /// 中文：
+    ///   置顶开关被拨动（规格 §11.4）。
+    ///   立即生效并存进设置——工人拨它是因为**此刻**窗口挡着或者看不见了，
+    ///   要求他再去别处保存一次，那一下就白拨了。
+    /// English:
+    ///   The always-on-top switch moved (spec §11.4). It applies immediately and is persisted: the
+    ///   operator flips it because the window is in the way or out of sight *right now*, and making
+    ///   them save it somewhere else would waste the flip.
+    /// </summary>
+    private void OnPinChanged(object sender, RoutedEventArgs e)
+    {
+        if (_isRestoringPin)
+        {
+            return;
+        }
+
+        var isPinned = PinButton.IsChecked == true;
+
+        Topmost = isPinned;
+        CurrentApp.Settings.FullWindowAlwaysOnTop = isPinned;
+        CurrentApp.SaveSettings();
+
+        Refresh();
+    }
+
     private void OnSwitchModeClicked(object sender, RoutedEventArgs e) => Session?.ToggleMode();
 
-    private void OnPauseClicked(object sender, RoutedEventArgs e)
+    private void OnPauseClicked(object sender, RoutedEventArgs e) => TogglePause();
+
+    private void TogglePause()
     {
         if (Session is not { } session)
         {
@@ -470,6 +550,37 @@ public partial class MainWindow : Window
         {
             session.Pause();
         }
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   把窗口叫到前面来。从 Compact 点托盘时要先展开。
+    ///
+    ///   ★ 这里**可以**抢焦点：工人是主动点的托盘，他要的就是看到这个窗口。
+    ///     与出错自动展开那条路正好相反——那时他没点任何东西，抢焦点会把他
+    ///     接下来敲的字吃掉（规格 §11.8）。
+    /// English:
+    ///   Brings the window forward, expanding from Compact first.
+    ///
+    ///   Taking focus is right here: the operator clicked the tray and wants to see this window.
+    ///   The opposite of the automatic expansion on an error, where they clicked nothing and taking
+    ///   focus would swallow what they type next (spec §11.8).
+    /// </summary>
+    private void BringToFront()
+    {
+        if (_compactWindow is not null)
+        {
+            ExpandFromCompact(activate: true);
+            return;
+        }
+
+        if (!IsVisible)
+        {
+            Show();
+        }
+
+        WindowState = WindowState.Normal;
+        Activate();
     }
 
     private void OnForceSendClicked(object sender, RoutedEventArgs e) => Session?.ForceSend();
@@ -503,7 +614,9 @@ public partial class MainWindow : Window
         Refresh();
     }
 
-    private void OnSettingsClicked(object sender, RoutedEventArgs e)
+    private void OnSettingsClicked(object sender, RoutedEventArgs e) => OpenSettings();
+
+    private void OpenSettings()
     {
         var settingsWindow = new SettingsWindow { Owner = this };
         settingsWindow.ShowDialog();
@@ -576,6 +689,14 @@ public partial class MainWindow : Window
 
         Show();
 
+        // ★ 恢复**工人在 Full 上的**置顶偏好，而不是把 Compact 的强制置顶带回来
+        //   （规格 §11.4）。不这么做的话，收起再展开一次，窗口就永久置顶了，
+        //   而工人根本没有做过那个选择。
+        // Restore the operator's preference for Full rather than carrying Compact's forced topmost
+        // back (spec §11.4). Otherwise one round trip through Compact leaves the window pinned
+        // forever, a choice the operator never made.
+        Topmost = CurrentApp.Settings.FullWindowAlwaysOnTop;
+
         if (activate)
         {
             Activate();
@@ -623,6 +744,14 @@ public partial class MainWindow : Window
         // leaves those keys dead in every other program — and nobody connects "F8 stopped working"
         // with this scanner program.
         _hotkeys?.Dispose();
+
+        // ★ 托盘图标必须显式释放。不释放的话它会**留在托盘里**直到鼠标碰它一下
+        //   才消失——工人看到的是"关了程序但图标还在"，与规格 §19 的干净收尾
+        //   正好相反。
+        // The tray icon must be disposed explicitly, or it sits in the tray until the mouse happens
+        // to pass over it — "I closed it but the icon is still there", the opposite of spec §19's
+        // clean shutdown.
+        _trayIcon?.Dispose();
 
         SaveBounds();
 
