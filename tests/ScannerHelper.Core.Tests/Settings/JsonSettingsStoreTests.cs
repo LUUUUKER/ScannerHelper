@@ -130,7 +130,7 @@ public sealed class JsonSettingsStoreTests : IDisposable
         var settings = store.Load();
 
         Assert.Equal(1, settings.SchemaVersion);
-        Assert.True(settings.ModeSwitchSoundEnabled);
+        Assert.False(settings.ModeSwitchSoundEnabled);
         Assert.False(File.Exists(SettingsFilePath));
         Assert.Empty(recoveryEvents);
     }
@@ -447,7 +447,19 @@ public sealed class JsonSettingsStoreTests : IDisposable
         var settings = store.Load();
 
         // 返回默认值 / defaults returned
-        Assert.True(settings.ModeSwitchSoundEnabled, $"{caseId}: 应返回默认值");
+        // ★ 这里**故意不用** ModeSwitchSoundEnabled 来证明"默认值生效了"。
+        //   决策 D-28 把它的默认值改成了 false，而 false 同时也是 bool 的零值——
+        //   断言 false 无法区分"默认值被应用了"和"这个字段压根没被赋值"，
+        //   那样的断言看着还在，其实已经什么都不证明了。
+        //   改用默认值不等于零值的字段：波特率默认 9600（决策 D-27）。
+        // ModeSwitchSoundEnabled is deliberately not used to prove "defaults were applied":
+        // decision D-28 made its default false, which is also bool's zero value, so asserting false
+        // cannot distinguish "the default was applied" from "the field was never set at all" — an
+        // assertion that still looks present while proving nothing. A field whose default differs
+        // from its zero value is used instead: the baud rate defaults to 9600 (decision D-27).
+        Assert.True(
+            settings.SerialPort.BaudRate == 9600,
+            $"{caseId}: 应返回默认值 / should fall back to the defaults");
         Assert.Equal(1, settings.SchemaVersion);
 
         // 发出诊断事件 / diagnostic raised
@@ -525,7 +537,18 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Assert.Equal("zh-CN", settings.Language);
         Assert.Equal(8, settings.SkuValidation.MinimumLength);
         Assert.True(settings.SkuValidation.IgnoreCase);      // 缺失的字段取默认值
-        Assert.True(settings.ModeSwitchSoundEnabled);
+
+        // ★ 这里**故意不用** ModeSwitchSoundEnabled 来证明"默认值生效了"。
+        //   决策 D-28 把它的默认值改成了 false，而 false 同时也是 bool 的零值——
+        //   断言 false 无法区分"默认值被应用了"和"这个字段压根没被赋值"，
+        //   那样的断言看着还在，其实已经什么都不证明了。
+        //   改用默认值不等于零值的字段：波特率默认 9600（决策 D-27）。
+        // ModeSwitchSoundEnabled is deliberately not used to prove "defaults were applied":
+        // decision D-28 made its default false, which is also bool's zero value, so asserting false
+        // cannot distinguish "the default was applied" from "the field was never set at all" — an
+        // assertion that still looks present while proving nothing. A field whose default differs
+        // from its zero value is used instead: the baud rate defaults to 9600 (decision D-27).
+        Assert.Equal(9600, settings.SerialPort.BaudRate);
     }
 
     /// <summary>
@@ -616,7 +639,17 @@ public sealed class JsonSettingsStoreTests : IDisposable
         var settings = store.Load();
 
         // 步骤 3 / Step 3
-        Assert.True(settings.ModeSwitchSoundEnabled);
+        // ★ 这里**故意不用** ModeSwitchSoundEnabled 来证明"默认值生效了"。
+        //   决策 D-28 把它的默认值改成了 false，而 false 同时也是 bool 的零值——
+        //   断言 false 无法区分"默认值被应用了"和"这个字段压根没被赋值"，
+        //   那样的断言看着还在，其实已经什么都不证明了。
+        //   改用默认值不等于零值的字段：波特率默认 9600（决策 D-27）。
+        // ModeSwitchSoundEnabled is deliberately not used to prove "defaults were applied":
+        // decision D-28 made its default false, which is also bool's zero value, so asserting false
+        // cannot distinguish "the default was applied" from "the field was never set at all" — an
+        // assertion that still looks present while proving nothing. A field whose default differs
+        // from its zero value is used instead: the baud rate defaults to 9600 (decision D-27).
+        Assert.Equal(9600, settings.SerialPort.BaudRate);
 
         // 步骤 4 / Step 4
         var recovery = Assert.Single(recoveryEvents);

@@ -72,8 +72,8 @@ public class AppSettingsDefaultsTests
     ///     S1   SchemaVersion = 1              从 V1 起就带版本号，为将来迁移留路
     ///     S2   Language 未设置                首次启动才去看系统语言（规格 §12）
     ///     S3   StartWithWindows = false
-    ///     S4   ModeSwitchSoundEnabled = true  规格 §7 默认播放模式切换音
-    ///     S5   ErrorSoundEnabled = true       规格 §10 错误必须有独立提示音
+    ///     S4   ModeSwitchSoundEnabled = false 决策 D-28：默认安静
+    ///     S5   ErrorSoundEnabled = false      决策 D-28：同上
     ///     S6   RememberWindowPosition = true
     ///     S7   FullWindowAlwaysOnTop = false
     ///     S9   SkuValidation.IgnoreCase = true 规格 §9.2 默认开启
@@ -101,8 +101,23 @@ public class AppSettingsDefaultsTests
         Assert.Equal(1, settings.SchemaVersion);                    // S1
         Assert.Null(settings.Language);                             // S2
         Assert.False(settings.StartWithWindows);                    // S3
-        Assert.True(settings.ModeSwitchSoundEnabled);               // S4
-        Assert.True(settings.ErrorSoundEnabled);                    // S5
+        // ★ S4、S5 —— 决策 D-28 把这两项从"默认开启"改成了"默认关闭"，
+        //   取代规格 §7 的「切换模式时默认出声」。
+        //
+        //   仓库本来就不安静。一个没人要求就每次切模式都响的程序发出的是噪声，
+        //   而被无视的提示音不只是没用——它会让人对这个程序发出的**所有**声音
+        //   都变得不敏感，包括真正要紧的那一声。默认安静、要用的人自己打开，
+        //   才能让"响了"保持分量。
+        //
+        //   声音关着并不削弱告知：出错时整块面板变红、带白色斜条纹、Compact
+        //   自动展开成 Full（规格 §11.7）。声音始终是辅助通道。
+        // S4 and S5 — decision D-28 turned both off by default, superseding spec §7's "play a
+        // short mode-change sound by default". A warehouse is never quiet, an unrequested beep on
+        // every mode change is noise, and an ignored sound dulls the operator to every sound this
+        // program makes, including the one that matters. Being off weakens nothing: an error turns
+        // the panel red with a hazard stripe and expands Compact to Full (spec §11.7).
+        Assert.False(settings.ModeSwitchSoundEnabled);              // S4
+        Assert.False(settings.ErrorSoundEnabled);                   // S5
         Assert.True(settings.RememberWindowPosition);               // S6
         Assert.False(settings.FullWindowAlwaysOnTop);               // S7
         Assert.True(settings.SkuValidation.IgnoreCase);             // S9
