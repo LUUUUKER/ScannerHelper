@@ -166,6 +166,93 @@
                 <TextBlock x:Name="TestResultText" Margin="0,6,0,0" TextWrapping="Wrap"
                            FontFamily="Consolas, Courier New, monospace" FontSize="12" />
 
+                <!--
+                    中文：
+                      SKU 校验（规格 §9）。三项各自独立，打开的都必须通过。
+
+                      ★ 留空 = 不启用，而不是"填 0"。长度用可空整数表达"没设这一项"，
+                        界面上就该是空着的输入框。逼工人填一个 0 去表示"不检查"，
+                        等于让他记住一条只有程序才懂的约定。
+
+                      ★ 「忽略大小写」单独一项，且默认开启（规格 §9.2）。
+                        它只管字符集这一项，不影响长度、不影响校验正则。仅仅因为
+                        有个小写字母就把一个本来正确的条码拒掉，比放过它更糟——
+                        真要求全大写的现场，应当写在正则里。
+                    English:
+                      SKU validation (spec §9). The three checks are independent and every enabled
+                      one must pass.
+
+                      Empty means off rather than "type 0": lengths are nullable, so "not set" is an
+                      empty box. Forcing a 0 to mean "do not check" would make the operator memorize
+                      a convention only the program understands.
+
+                      Ignore case is separate and on by default (spec §9.2). It governs the
+                      character set alone and affects neither length nor the validation pattern.
+                      Rejecting an otherwise valid barcode purely for a lowercase letter is a worse
+                      failure than accepting one; a site that genuinely requires uppercase says so
+                      in the pattern.
+                -->
+                <TextBlock FontWeight="SemiBold" Margin="0,18,0,2"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsValidation]}" />
+                <TextBlock Margin="0,0,0,6" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsValidationHint]}" />
+
+                <Grid>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="70" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="70" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                               Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsMinLength]}" />
+                    <TextBox x:Name="MinLengthBox" Grid.Column="1" Height="26" Margin="8,0,0,0"
+                             VerticalContentAlignment="Center" />
+                    <TextBlock Grid.Column="2" VerticalAlignment="Center" Margin="14,0,0,0"
+                               Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsMaxLength]}" />
+                    <TextBox x:Name="MaxLengthBox" Grid.Column="3" Height="26" Margin="8,0,0,0"
+                             VerticalContentAlignment="Center" />
+                </Grid>
+
+                <Grid Margin="0,8,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                               Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsCharacterSet]}" />
+                    <ComboBox x:Name="CharacterSetCombo" Grid.Column="1" Height="26" Margin="8,0,0,0">
+                        <ComboBoxItem Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsCharsAny]}" />
+                        <ComboBoxItem Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsCharsNumbers]}" />
+                        <ComboBoxItem Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsCharsLetters]}" />
+                        <ComboBoxItem Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsCharsLettersNumbers]}" />
+                        <ComboBoxItem Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsCharsLettersNumbersDashUnderscore]}" />
+                    </ComboBox>
+                </Grid>
+
+                <CheckBox x:Name="IgnoreCaseCheck" Margin="0,10,0,0"
+                          Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsIgnoreCase]}" />
+                <TextBlock Margin="22,4,0,0" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsIgnoreCaseHint]}" />
+
+                <Grid Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0" VerticalAlignment="Center"
+                               Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsValidationRegex]}" />
+                    <TextBox x:Name="ValidationRegexBox" Grid.Column="1" Height="26" Margin="8,0,0,0"
+                             FontFamily="Consolas, Courier New, monospace"
+                             VerticalContentAlignment="Center" />
+                </Grid>
+                <TextBlock Margin="0,4,0,0" FontSize="12" TextWrapping="Wrap"
+                           Foreground="{StaticResource MutedTextBrush}"
+                           Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsValidationRegexHint]}" />
+
                 <TextBlock FontWeight="SemiBold" Margin="0,18,0,6"
                            Text="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SettingsOutput]}" />
                 <CheckBox x:Name="AppendEnterCheck"

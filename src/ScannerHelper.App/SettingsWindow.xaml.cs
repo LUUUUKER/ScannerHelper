@@ -49,6 +49,17 @@ using ScannerHelper.App.Localization;
 using ScannerHelper.Core.Domain;
 using ScannerHelper.Core.Parsing;
 using ScannerHelper.Core.Settings;
+using ScannerHelper.Core.Validation;
+
+// ★ ValidationResult 这个名字在 WPF 里也有一个（System.Windows.Controls，用于
+//   数据绑定校验），与领域里的那个同名。别名把要用的那个钉死，免得写成谁的都能
+//   编译过、而含义完全不同——这类错误编译器不会拦，只会在运行时给出一个说不通
+//   的结果。
+// ValidationResult also exists in WPF (System.Windows.Controls, for binding validation) under the
+// same name. The alias pins the one meant here, so a mix-up cannot compile into something that
+// looks fine and means something else — a mistake the compiler does not catch and that only shows
+// up as a result nobody can explain at runtime.
+using ValidationResult = ScannerHelper.Core.Domain.ValidationResult;
 
 namespace ScannerHelper.App;
 
@@ -128,6 +139,20 @@ public partial class SettingsWindow : Window
         LengthBox.Text = parsing.Length.ToString(CultureInfo.InvariantCulture);
         RegexBox.Text = parsing.RegexPattern ?? string.Empty;
         CaptureGroupBox.Text = parsing.CaptureGroupIndex.ToString(CultureInfo.InvariantCulture);
+
+        var validation = settings.SkuValidation;
+        MinLengthBox.Text = FormatOptionalLength(validation.MinimumLength);
+        MaxLengthBox.Text = FormatOptionalLength(validation.MaximumLength);
+        CharacterSetCombo.SelectedIndex = validation.CharacterSet switch
+        {
+            CharacterSetPreset.Numbers => 1,
+            CharacterSetPreset.Letters => 2,
+            CharacterSetPreset.LettersNumbers => 3,
+            CharacterSetPreset.LettersNumbersDashUnderscore => 4,
+            _ => 0,
+        };
+        IgnoreCaseCheck.IsChecked = validation.IgnoreCase;
+        ValidationRegexBox.Text = validation.ValidationRegexPattern ?? string.Empty;
 
         AppendEnterCheck.IsChecked = settings.AppendEnterAfterScan;
         ModeSoundCheck.IsChecked = settings.ModeSwitchSoundEnabled;
@@ -249,9 +274,29 @@ public partial class SettingsWindow : Window
 
         var result = SkuParserFactory.Create(parsing).Parse(lastScan);
 
-        TestResultText.Text = result is ParseResult.Success success
-            ? Localizer.Format("SettingsTestResult", success.Sku)
-            : Localizer.Format("SettingsTestFailed", lastScan);
+        if (result is not ParseResult.Success success)
+        {
+            TestResultText.Text = Localizer.Format("SettingsTestFailed", lastScan);
+            return;
+        }
+
+        // ★ 解析成功之后接着跑校验。工人改完规则想知道的是"这一枪到底能不能过"，
+        //   而不是"截出来的那一段长什么样"——只报解析结果等于把问题回答了一半，
+        //   而剩下那一半正是他下一秒会撞上的。
+        // Validation runs straight after a successful parse. What the operator wants to know after
+        // editing rules is whether this scan gets through, not what the extracted slice looks like;
+        // reporting only the parse answers half the question, and the other half is what they are
+        // about to hit.
+        if (BuildValidationSettings() is not { } validationSettings)
+        {
+            return;
+        }
+
+        var validation = SkuValidatorFactory.Create(validationSettings).Validate(success.Sku);
+
+        TestResultText.Text = validation is ValidationResult.Invalid invalid
+            ? Localizer.Format("SettingsTestInvalid", success.Sku, Describe(invalid))
+            : Localizer.Format("SettingsTestValid", success.Sku);
     }
 
     /// <summary>
@@ -299,6 +344,113 @@ public partial class SettingsWindow : Window
         };
     }
 
+    /// <summary>
+    /// 中文：
+    ///   把长度输入框读成可空整数。空 = 不启用这一项。
+    ///   输出：解析成功返回 (true, 值)；填了但不是合法数字返回 (false, null)。
+    ///
+    ///   ★ "空"和"填错了"必须区分开。两者都当成"不启用"看着省事，实际是把工人的
+    ///     手误静静吞掉：他明明填了 8，因为多打了一个字符就变成"不检查长度"，
+    ///     而界面上什么都没说。
+    /// English:
+    ///   Reads a length box as a nullable integer — empty meaning the check is off — and reports
+    ///   separately when something was typed that is not a valid number.
+    ///
+    ///   Empty and mistyped must not be conflated. Treating both as "off" looks convenient and
+    ///   quietly swallows a typo: they typed 8, one stray character turned it into "do not check
+    ///   the length", and nothing on screen said so.
+    /// </summary>
+    private static (bool IsValid, int? Value) ReadOptionalLength(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+        {
+            return (true, null);
+        }
+
+        return int.TryParse(text.Trim(), out var value) && value >= 0
+            ? (true, value)
+            : (false, null);
+    }
+
+    private static string FormatOptionalLength(int? value)
+        => value?.ToString(CultureInfo.InvariantCulture) ?? string.Empty;
+
+    /// <summary>
+    /// 中文：
+    ///   从界面上读出校验设置（规格 §9）。数字填错就提示并返回 null。
+    ///
+    ///   ★ 正则不在这里试着编译。规格 §9.3 要求正则始终带有限超时，而那件事由
+    ///     SkuValidatorFactory 统一负责；在这里再编一次，等于给"这条正则合不合法"
+    ///     制造第二个判断点，两处一旦不一致，工人保存得下去却用不了。
+    ///     要看它管不管用，用「用最近一枪试一下」——那条路走的是真正在跑的那套。
+    /// English:
+    ///   Reads the validation settings from the UI (spec §9), prompting and returning null when a
+    ///   number is wrong.
+    ///
+    ///   The pattern is not compiled here. Spec §9.3 requires a finite timeout on every regex and
+    ///   SkuValidatorFactory owns that; compiling again here would create a second place deciding
+    ///   whether a pattern is legal, and once the two disagree the operator saves something that
+    ///   then does not work. "Test with the last scan" answers that through the code that runs.
+    /// </summary>
+    private SkuValidationSettings? BuildValidationSettings()
+    {
+        var (minimumIsValid, minimum) = ReadOptionalLength(MinLengthBox.Text);
+        var (maximumIsValid, maximum) = ReadOptionalLength(MaxLengthBox.Text);
+
+        if (!minimumIsValid || !maximumIsValid)
+        {
+            TestResultText.Text = Localizer.Format(
+                "SettingsTestFailed", minimumIsValid ? MaxLengthBox.Text : MinLengthBox.Text);
+            return null;
+        }
+
+        return new SkuValidationSettings
+        {
+            MinimumLength = minimum,
+            MaximumLength = maximum,
+            CharacterSet = CharacterSetCombo.SelectedIndex switch
+            {
+                1 => CharacterSetPreset.Numbers,
+                2 => CharacterSetPreset.Letters,
+                3 => CharacterSetPreset.LettersNumbers,
+                4 => CharacterSetPreset.LettersNumbersDashUnderscore,
+                _ => null,
+            },
+            IgnoreCase = IgnoreCaseCheck.IsChecked == true,
+            ValidationRegexPattern = string.IsNullOrWhiteSpace(ValidationRegexBox.Text)
+                ? null
+                : ValidationRegexBox.Text,
+        };
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   把校验失败的原因说成人话。
+    ///
+    ///   ★ 说的是"哪一条没过"，而不是"没过"。工人看到「12 < 16」能立刻判断是码
+    ///     不对还是规则配错了；只看到"校验失败"，他两种都判断不了，而这正是他
+    ///     打开设置要解决的问题。
+    /// English:
+    ///   Renders validation failures readably, naming which check failed rather than only that one
+    ///   did. "12 < 16" lets the operator tell a wrong code from a wrong rule instantly;
+    ///   "validation failed" lets them tell neither — and telling them apart is why they opened
+    ///   Settings.
+    /// </summary>
+    private static string Describe(ValidationResult.Invalid invalid)
+        => string.Join("; ", invalid.Failures.Select(failure => failure switch
+        {
+            ValidationFailure.TooShort tooShort => string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} < {1}", tooShort.ActualLength, tooShort.MinimumLength),
+            ValidationFailure.TooLong tooLong => string.Format(
+                CultureInfo.InvariantCulture,
+                "{0} > {1}", tooLong.ActualLength, tooLong.MaximumLength),
+            ValidationFailure.IllegalCharacter illegal => string.Format(
+                CultureInfo.InvariantCulture,
+                "'{0}' @{1}", illegal.Character, illegal.Position),
+            _ => failure.ToString() ?? string.Empty,
+        }));
+
     private void OnSaveClicked(object sender, RoutedEventArgs e)
     {
         if (BuildParsingSettings() is not { } parsing)
@@ -309,7 +461,13 @@ public partial class SettingsWindow : Window
         var settings = CurrentApp.Settings;
 
         settings.Language = Localizer.ToPersistedValue(Localizer.Current);
+        if (BuildValidationSettings() is not { } validation)
+        {
+            return;
+        }
+
         settings.SkuParsing = parsing;
+        settings.SkuValidation = validation;
         settings.AppendEnterAfterScan = AppendEnterCheck.IsChecked == true;
         settings.ModeSwitchSoundEnabled = ModeSoundCheck.IsChecked == true;
         settings.ErrorSoundEnabled = ErrorSoundCheck.IsChecked == true;

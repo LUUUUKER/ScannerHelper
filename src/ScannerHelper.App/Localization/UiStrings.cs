@@ -157,6 +157,27 @@ public static class UiStrings
         ["SettingsLength"] = "Length",
         ["SettingsRegexPattern"] = "Pattern",
         ["SettingsCaptureGroup"] = "Capture group",
+        ["SettingsValidation"] = "SKU validation",
+        ["SettingsValidationHint"] =
+            "Every check you turn on must pass. Leave a field empty to turn that check off.",
+        ["SettingsMinLength"] = "Min length",
+        ["SettingsMaxLength"] = "Max length",
+        ["SettingsCharacterSet"] = "Allowed characters",
+        ["SettingsCharsAny"] = "No restriction",
+        ["SettingsCharsNumbers"] = "Numbers only",
+        ["SettingsCharsLetters"] = "Letters only",
+        ["SettingsCharsLettersNumbers"] = "Letters and numbers",
+        ["SettingsCharsLettersNumbersDashUnderscore"] = "Letters, numbers, - and _",
+        ["SettingsIgnoreCase"] = "Ignore letter case",
+        ["SettingsIgnoreCaseHint"] =
+            "On by default. Rejecting an otherwise valid barcode purely for a lowercase letter is a"
+            + " worse failure than accepting one. If uppercase is genuinely required, say so in the"
+            + " validation pattern (^[A-Z]+$), which this toggle does not affect.",
+        ["SettingsValidationRegex"] = "Validation pattern",
+        ["SettingsValidationRegexHint"] =
+            "The extracted SKU must match this. Leave empty to skip the check.",
+        ["SettingsTestValid"] = "Result: {0}  ✓ passes validation",
+        ["SettingsTestInvalid"] = "Result: {0}  ✗ {1}",
         ["SettingsOutput"] = "Output",
         ["SettingsAppendEnter"] = "Press Enter after each scan",
         ["SettingsAppendEnterHint"] =
@@ -254,6 +275,24 @@ public static class UiStrings
         ["SettingsLength"] = "长度",
         ["SettingsRegexPattern"] = "表达式",
         ["SettingsCaptureGroup"] = "捕获组",
+        ["SettingsValidation"] = "SKU 校验",
+        ["SettingsValidationHint"] = "打开的每一项都必须通过。留空就是不启用这一项。",
+        ["SettingsMinLength"] = "最短",
+        ["SettingsMaxLength"] = "最长",
+        ["SettingsCharacterSet"] = "允许的字符",
+        ["SettingsCharsAny"] = "不限",
+        ["SettingsCharsNumbers"] = "只允许数字",
+        ["SettingsCharsLetters"] = "只允许字母",
+        ["SettingsCharsLettersNumbers"] = "字母和数字",
+        ["SettingsCharsLettersNumbersDashUnderscore"] = "字母、数字、- 和 _",
+        ["SettingsIgnoreCase"] = "忽略字母大小写",
+        ["SettingsIgnoreCaseHint"] =
+            "默认开启。仅仅因为有个小写字母就把一个本来正确的条码拒掉，比放过它更糟。"
+            + "如果确实要求全大写，请写在校验正则里（^[A-Z]+$），那条不受这个开关影响。",
+        ["SettingsValidationRegex"] = "校验正则",
+        ["SettingsValidationRegexHint"] = "提取出来的 SKU 必须匹配它。留空就是不做这项检查。",
+        ["SettingsTestValid"] = "结果：{0}  ✓ 校验通过",
+        ["SettingsTestInvalid"] = "结果：{0}  ✗ {1}",
         ["SettingsOutput"] = "输出",
         ["SettingsAppendEnter"] = "每枪之后按一次回车",
         ["SettingsAppendEnterHint"] = "默认关闭。只有当网页需要回车才提交或跳到下一格时才打开。",
