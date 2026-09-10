@@ -278,6 +278,22 @@ public sealed class DeferredKeyboardOutput : IKeyboardOutputService
     }
 
     /// <summary>
+    /// 中文：
+    ///   把队列丢掉，什么都不发。只给「只观测不吞掉」的诊断模式用。
+    ///
+    ///   ★ 那个模式下按键根本没被吞掉，已经原样送达业务软件了。这时再补发
+    ///     就是同一下按键送达两次——正是我们刚修掉的那个毛病。所以那条路上
+    ///     必须丢弃，不能发送。
+    /// English:
+    ///   Drops the queue without sending anything, for the observe-only diagnostic mode alone.
+    ///
+    ///   In that mode nothing was swallowed and the keystroke already reached the business
+    ///   application; replaying it would deliver the same keypress twice — exactly the defect
+    ///   just fixed. So that path must discard rather than send.
+    /// </summary>
+    public void Discard() => _queue.Clear();
+
+    /// <summary>
     /// 中文：执行一次发送并兜住异常。Win32Exception 是预期内的失败
     ///       （最常见是 UIPI，规格 §2.1 假设 A2），别的异常同样不能让
     ///       消息循环倒下——循环一停，钩子还挂着却再也没人处理 WM_INPUT。

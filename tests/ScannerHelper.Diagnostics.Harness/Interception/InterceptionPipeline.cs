@@ -100,6 +100,7 @@ public readonly record struct PipelineSnapshot(
     bool IsRunning,
     bool IsPaused,
     bool IsBound,
+    bool ObserveOnly,
     ScanPipelineState State,
     ScanMode Mode,
     string? PendingErrorRawCode,
@@ -216,6 +217,17 @@ public sealed class InterceptionPipeline : IDisposable
     }
 
     /// <summary>
+    /// 中文：诊断用：只观测不吞掉。详见 <see cref="Win32ScannerInputSource.ObserveOnly"/>。
+    /// English: Diagnostic: observe without swallowing. See
+    ///          <see cref="Win32ScannerInputSource.ObserveOnly"/>.
+    /// </summary>
+    public bool ObserveOnly
+    {
+        get => _source.ObserveOnly;
+        set => _source.ObserveOnly = value;
+    }
+
+    /// <summary>
     /// 中文：当前模式。
     /// English: The current mode.
     /// </summary>
@@ -307,6 +319,7 @@ public sealed class InterceptionPipeline : IDisposable
             IsRunning: _source.IsRunning,
             IsPaused: _source.IsPaused,
             IsBound: _source.IsBound,
+            ObserveOnly: _source.ObserveOnly,
             State: _coordinator.State,
             Mode: _modeManager.CurrentMode,
             PendingErrorRawCode: _coordinator.PendingError?.RawCode,

@@ -277,6 +277,20 @@ public partial class InterceptionWindow : Window
     private void OnAppendEnterChanged(object sender, RoutedEventArgs e)
         => _pipeline.AppendEnterAfterScan = AppendEnterCheck.IsChecked == true;
 
+    /// <summary>
+    /// 中文：切换「只观测不吞掉」。切换时把计数清一遍才有意义——两种模式的
+    ///       计数混在一起就什么都说明不了。计数在流水线里，重开一次即可，
+    ///       所以这里只提示，不自动重启。
+    /// English: Toggles observe-only. The counters only mean something if each mode is measured
+    ///          on its own, so the two must not be mixed; the counters live in the pipeline and
+    ///          a restart clears them, which this only advises rather than forcing.
+    /// </summary>
+    private void OnObserveOnlyChanged(object sender, RoutedEventArgs e)
+    {
+        _pipeline.ObserveOnly = ObserveOnlyCheck.IsChecked == true;
+        Refresh();
+    }
+
     private void OnForceSendClicked(object sender, RoutedEventArgs e)
     {
         _pipeline.ForceSend();
@@ -359,6 +373,11 @@ public partial class InterceptionWindow : Window
     private void UpdateStateText(PipelineSnapshot snapshot)
     {
         var state = new StringBuilder();
+
+        if (snapshot.ObserveOnly)
+        {
+            state.AppendLine("★ 只观测不吞掉（诊断）/ OBSERVE ONLY (diagnostic)");
+        }
 
         state.AppendLine(snapshot.IsRunning
             ? snapshot.IsPaused

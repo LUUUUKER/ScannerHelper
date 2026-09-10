@@ -214,6 +214,7 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     private IntPtr _windowHandle;
 
     private long _boundDeviceHandle;
+    private volatile bool _observeOnly;
     private long _swallowedCount;
     private long _passedThroughCount;
     private long _rawInputCount;
@@ -301,6 +302,53 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     ///   is the device path (spec §6, see ScannerDeviceIdentity).
     /// </summary>
     public nint BoundDeviceHandle => (nint)Interlocked.Read(ref _boundDeviceHandle);
+
+    /// <summary>
+    /// 中文：
+    ///   诊断用：**只观测，不吞掉**。默认关闭。
+    ///
+    ///   ★ 它存在是为了回答一个架构级的问题：把按键吞掉之后，它的 WM_INPUT
+    ///     还会不会产生？
+    ///
+    ///     整个 V1 架构建立在「先扣留、等 Raw Input 揭示来源、再决定」之上
+    ///     （规格 §5.3）。可如果吞掉这个动作本身就切断了 Raw Input，那么扣留
+    ///     等于销毁了用来判断的证据，这条路根本走不通——而不是某处有 bug。
+    ///     实施计划 Task 4b 的硬性关卡问的正是这件事。
+    ///
+    ///     打开它，钩子恒放行、一切照常送达业务软件，但关联器照常运行。于是：
+    ///       - 「超时未关联」掉到接近 0  → 不吞的时候配对是好的 → 是吞掉切断了
+    ///                                     Raw Input → 架构问题，必须停下来重新设计；
+    ///       - 「超时未关联」仍然很高    → 与吞不吞无关 → 是我们自己的 bug。
+    ///
+    ///     两个结论要做的事完全相反，所以必须先分清，不能靠猜。
+    ///
+    ///   ★ 这个模式下**绝不补发、绝不输出**：按键没被吞掉，已经原样送达了，
+    ///     再补发就是同一下送达两次。
+    /// English:
+    ///   Diagnostic: observe without swallowing. Off by default.
+    ///
+    ///   It exists to answer an architectural question: once a keystroke is swallowed, is its
+    ///   WM_INPUT still produced? The whole V1 architecture rests on withholding, waiting for Raw
+    ///   Input to reveal the source, and then deciding (spec §5.3). If swallowing itself cuts off
+    ///   Raw Input, then withholding destroys the evidence the decision needs and the approach
+    ///   cannot work at all — as opposed to having a bug somewhere. That is precisely what the
+    ///   implementation plan's Task 4b hard gate asks.
+    ///
+    ///   With this on, the hook always passes through and everything reaches the business
+    ///   application as usual while the correlator still runs. If the unresolved count falls to
+    ///   near zero, pairing is fine when nothing is swallowed and swallowing is what cuts off Raw
+    ///   Input — an architectural problem requiring a stop and a redesign. If it stays high, the
+    ///   fault is ours and unrelated to swallowing. The two conclusions demand opposite actions,
+    ///   so they must be separated by measurement rather than guessed at.
+    ///
+    ///   Nothing is replayed or emitted in this mode: the keystroke was not swallowed and has
+    ///   already arrived, so replaying it would deliver the same keypress twice.
+    /// </summary>
+    public bool ObserveOnly
+    {
+        get => _observeOnly;
+        set => _observeOnly = value;
+    }
 
     /// <summary>
     /// 中文：是否已绑定扫码枪。未绑定时整条流水线被旁路，什么都不吞。
@@ -601,7 +649,15 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     void ICaptureThreadWork.OnRawInputMessage(IntPtr rawInputHandle, long timestamp)
     {
         _rawInput?.HandleRawInput(rawInputHandle, timestamp);
-        _output.Drain();
+
+        if (_observeOnly)
+        {
+            _output.Discard();
+        }
+        else
+        {
+            _output.Drain();
+        }
     }
 
     /// <summary>
@@ -620,7 +676,15 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
         try
         {
             _coordinator.Tick();
-            _output.Drain();
+
+            if (_observeOnly)
+            {
+                _output.Discard();
+            }
+            else
+            {
+                _output.Drain();
+            }
         }
         catch (Exception tickException)
         {
@@ -767,7 +831,22 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
             // header.
             if (_output.HasPending)
             {
-                _host.Post(_drainOutput);
+                if (_observeOnly)
+                {
+                    _output.Discard();
+                }
+                else
+                {
+                    _host.Post(_drainOutput);
+                }
+            }
+
+            // ★ 只观测模式：照常记账，但恒放行。见 ObserveOnly。
+            // Observe-only: keep the books as usual, but always pass through. See ObserveOnly.
+            if (_observeOnly)
+            {
+                Interlocked.Increment(ref _passedThroughCount);
+                return HookDecision.PassThrough;
             }
 
             if (action == HookAction.Swallow)

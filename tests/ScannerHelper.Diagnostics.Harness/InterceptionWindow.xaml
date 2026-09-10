@@ -67,6 +67,10 @@
                             Margin="6,0,0,0" Click="OnBindClicked" IsEnabled="False" />
                     <Button x:Name="UnbindButton" Content="解绑 / Unbind" Width="110" Height="26"
                             Margin="6,0,0,0" Click="OnUnbindClicked" IsEnabled="False" />
+                    <CheckBox x:Name="ObserveOnlyCheck" VerticalAlignment="Center" Margin="16,0,0,0"
+                              Content="诊断：只观测不吞掉 / Observe only"
+                              ToolTip="打开后钩子恒放行、什么都不吞，但关联器照常运行。用来分清「配对失败」是不是由吞掉本身造成的。"
+                              Checked="OnObserveOnlyChanged" Unchecked="OnObserveOnlyChanged" />
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
