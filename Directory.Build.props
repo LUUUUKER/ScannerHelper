@@ -1,0 +1,71 @@
+<Project>
+
+  <!--
+    中文：
+      解决方案级的公共构建属性。所有项目自动继承本文件，无需逐个 csproj 重复。
+
+      ★ 这里只放**对每个项目都成立**的设置。
+
+        TargetFramework 刻意不放进来：Core 必须是 net8.0，而 Phase B 的
+        ScannerHelper.Win32 与 ScannerHelper.App 必须是 net8.0-windows。这是
+        整个架构最关键的一条边界（规格 §16），必须在各自的 csproj 里显式写明、
+        一眼可见，而不是从一个公共文件里悄悄继承过来。
+
+    English:
+      Solution-wide build properties, inherited automatically by every project.
+
+      Only settings true for *every* project belong here. TargetFramework is
+      deliberately absent: Core must be net8.0 while Phase B's ScannerHelper.Win32
+      and ScannerHelper.App must be net8.0-windows. That boundary is the most
+      important one in the architecture (spec §16) and must be stated visibly in
+      each csproj rather than inherited quietly from a shared file.
+  -->
+
+  <PropertyGroup>
+    <!--
+      中文：
+        警告一律当作错误。
+
+        测试计划的构建检查 B1 要求"零错误、零警告"，但在此之前没有任何东西
+        强制它——全靠人在几十行构建输出里自己注意到。警告会累积：一旦容忍了
+        第一条，后来的就淹没在噪音里，而可空性警告（CS8600 系列）恰恰是最
+        值得当场处理的一类。Core 全程开启 <Nullable>enable</Nullable>，
+        把这些警告放过去，等于把可空标注降级成了注释。
+
+      English:
+        Warnings are errors.
+
+        Build check B1 in the test plan requires zero errors and zero warnings, but
+        until now nothing enforced it — it relied on a person noticing amid dozens of
+        lines of build output. Warnings accumulate: tolerate the first and later ones
+        drown in the noise, and the nullability warnings (the CS8600 family) are
+        exactly the kind worth handling on the spot. Core enables nullable reference
+        types throughout, and letting those warnings pass would demote the
+        annotations to comments.
+    -->
+    <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
+
+    <!--
+      中文：
+        确定性构建。相同的源码在不同机器上产出逐字节相同的程序集。
+
+        规格 §22.1 要求发布版必须代码签名，而仓库 IT 会按**哈希**把可执行文件
+        加进白名单。构建不确定意味着同一份源码重新构建一次哈希就变了，白名单
+        随即失效，需要 IT 重新加一遍——那是要打电话找人的事。
+      English:
+        Deterministic builds: the same source produces byte-identical assemblies on
+        any machine. Spec §22.1 requires the release to be code-signed, and warehouse
+        IT allow-lists the executable *by hash*. Non-deterministic output means a
+        rebuild of identical source changes the hash, invalidating the allow-list
+        entry and requiring IT to add it again — a phone call, every time.
+    -->
+    <Deterministic>true</Deterministic>
+
+    <!--
+      中文：不生成隐式的 AssemblyInfo 冲突项；保持各项目自行声明元数据的自由。
+      English: Keeps each project free to declare its own assembly metadata.
+    -->
+    <GenerateDocumentationFile>false</GenerateDocumentationFile>
+  </PropertyGroup>
+
+</Project>

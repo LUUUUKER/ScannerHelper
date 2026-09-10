@@ -51,6 +51,7 @@
 //   No_settings_type_carries_the_scan_mode      S11
 //   No_settings_type_carries_the_paused_state   S12
 //   Serialized_settings_contain_no_mode_or_paused_key  S13
+//   Non_nullable_settings_sections_reject_null  S31
 // =============================================================================
 
 using System.Reflection;
@@ -282,6 +283,93 @@ public class AppSettingsDefaultsTests
         Assert.True(offendingKeys.Length == 0,
             "配置文件中绝不能出现当前模式或暂停状态（规格 §3、§5.7、§14）。"
             + $" 发现键：{string.Join(", ", offendingKeys)}");
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   S31 — 不可为空的配置分组，赋 null 后必须仍然是一个可用实例。
+    ///   输入：无。输出：无（断言）。
+    ///   步骤：
+    ///     1. 用 NullabilityInfoContext 挑出 AppSettings 上所有"声明为不可空"
+    ///        且类型属于设置命名空间的属性；
+    ///     2. 断言至少挑出了一个——否则筛选条件写错时，这条测试会在什么都没测
+    ///        的情况下变绿；
+    ///     3. 逐个反射赋 null；
+    ///     4. 断言取回来的值仍然非空。
+    ///
+    ///   ★ 这条与 JsonSettingsStoreTests 的 S30 是同一个不变式的两面。
+    ///
+    ///     S30 从**行为**一侧验证：一份把某分组写成 null 的配置文件，读回来
+    ///     是默认实例。本条从**类型**一侧验证：不管谁、以什么方式赋 null，
+    ///     属性都不会真的变成 null。
+    ///
+    ///     两条都要，因为它们失效的方式不同。S30 只覆盖了 JSON 这一条路径，
+    ///     将来换一个序列化器、或者有人手写 new AppSettings { Hotkeys = null! }，
+    ///     S30 依然是绿的。而本条会随着 AppSettings 新增分组**自动**覆盖到它——
+    ///     不需要有人记得回来补一条用例，而需要人记得的守卫迟早会漏。
+    ///
+    ///   为什么这个不变式值得守：.NET 8 的 System.Text.Json 完全忽略可空性
+    ///   标注，所以"这个属性声明成不可空"在反序列化时一点约束力都没有。
+    ///   声明与实际行为之间的这道缝，必须由 setter 自己合上。
+    ///
+    /// English:
+    ///   S31 — a section declared non-nullable stays usable after null is assigned.
+    ///   Steps: (1) use NullabilityInfoContext to select every AppSettings property
+    ///   that is declared non-nullable and typed in the settings namespace; (2) assert
+    ///   at least one was selected, so a mistaken filter cannot leave this test green
+    ///   while testing nothing; (3) assign null to each by reflection; (4) assert the
+    ///   value read back is still not null.
+    ///
+    ///   This and JsonSettingsStoreTests' S30 are two sides of one invariant. S30
+    ///   checks the behavior: a file writing a section as null loads as a default
+    ///   instance. This one checks the type: no assignment, by anyone, through any
+    ///   route, actually leaves the property null.
+    ///
+    ///   Both are needed because they fail differently. S30 covers the JSON path
+    ///   alone and would stay green under a different serializer, or against a
+    ///   hand-written new AppSettings { Hotkeys = null! }. This one, in exchange,
+    ///   extends automatically to any section added to AppSettings later — no one has
+    ///   to remember to come back and add a case, and a guard that depends on
+    ///   remembering eventually misses one.
+    ///
+    ///   Why the invariant is worth guarding: .NET 8's System.Text.Json ignores
+    ///   nullability annotations outright, so declaring a property non-nullable
+    ///   constrains deserialization not at all. That gap between the declaration and
+    ///   the actual behavior has to be closed by the setter itself.
+    /// </summary>
+    [Fact]
+    public void Non_nullable_settings_sections_reject_null()
+    {
+        var nullabilityContext = new NullabilityInfoContext();
+        var settingsNamespace = typeof(AppSettings).Namespace;
+
+        // 步骤 1 / Step 1
+        var requiredSections = typeof(AppSettings)
+            .GetProperties(BindingFlags.Public | BindingFlags.Instance)
+            .Where(property => property.PropertyType.Namespace == settingsNamespace)
+            .Where(property =>
+                nullabilityContext.Create(property).WriteState == NullabilityState.NotNull)
+            .ToArray();
+
+        // 步骤 2 / Step 2
+        Assert.True(requiredSections.Length > 0,
+            "没有挑出任何不可为空的配置分组，说明筛选条件本身写错了——"
+            + "这条测试会在什么都没检查的情况下变绿。");
+
+        var settings = new AppSettings();
+
+        foreach (var section in requiredSections)
+        {
+            // 步骤 3 / Step 3
+            section.SetValue(settings, null);
+
+            // 步骤 4 / Step 4
+            Assert.True(section.GetValue(settings) is not null,
+                $"AppSettings.{section.Name} 声明为不可空，但赋 null 之后真的变成了 null。"
+                + " System.Text.Json 会忽略可空性标注，因此一份把该分组写成 null 的"
+                + "配置文件会让 Load 返回半空对象，Phase B 里表现为启动即空引用异常。"
+                + " 请让该属性的 setter 把 null 折成默认实例。");
+        }
     }
 
     /// <summary>

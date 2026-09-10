@@ -14,10 +14,15 @@ Test IDs are stable and map one-to-one onto test method names. Reference them in
 |---|---|---|
 | 1 | Solution boundaries and layering guards | 6 (3 build checks + 3 tests) |
 | 2 | Domain types, mode, parsing, validation | 90 |
-| 3 | Settings model and JSON persistence | 20 (28 case IDs) |
-| | **Total** | **113** |
+| 2 | Settings-to-parser/validator factories | 18 |
+| 3 | Settings model and JSON persistence | 29 (37 case IDs) |
+| | **Total** | **137** |
 
 Task 2 breakdown: ModeManager 7, FixedPosition 17, Regex parser 13, Length 12, CharacterSet 15, Regex validator 9, Composite 11, result types 6.
+
+The factory row (PF1–PF10, VF1–VF8) and Task 3's S29–S31 were added after the first
+pass through Tasks 1–3, when review found gaps rather than defects in what had been
+written. §4.9, §4.10 and §5.5 give each case its reason.
 
 Counts are xUnit executions, so a `[Theory]` row counts once. They are kept equal to what `dotnet test` reports, so the two can be compared directly.
 
@@ -281,6 +286,80 @@ Full closure is *not* asserted, because it is not true. C# generates a `protecte
 
 The alternative, scanning every IL string literal, was rejected for producing false positives: it would flag exception messages, regex patterns and configuration keys. This project's exception messages are deliberately long bilingual sentences aimed at developers rather than operators, and blocking those would be wrong. A test that cries wolf acquires exceptions, then gets ignored, then gets deleted. Narrow and reliable beats broad and noisy.
 
+### 4.9 `SkuParserFactory`
+
+Settings hold what the operator typed; parsers know how to parse; nothing joined them
+until this factory. It composes and never judges — every validity check stays in the
+parser constructors (D-2), so each constraint has exactly one definition.
+
+| ID | Scenario | Expected |
+|---|---|---|
+| PF1 | Fixed-position settings, `ABCD12345678XYZ` | `12345678` — spec §8's example |
+| PF2 | Regex settings, same raw code | `12345678` — the same answer by the other route |
+| PF3 | `null` settings | Throws `ArgumentNullException` (D-1) |
+| PF4 | Regex rule, pattern `null` | Config rejected |
+| PF5 | Regex rule, pattern `""` | Config rejected |
+| PF6 | Regex rule, pattern `"   "` | Config rejected |
+| PF7 | Fixed position, start `0` | Constructor's `ArgumentOutOfRangeException` propagates |
+| PF8 | Regex pattern `[` | Constructor's `ArgumentException` propagates |
+| PF9 | `(SkuParsingRuleType)99` | Config rejected |
+| PF10 | Fresh-install defaults | Builds a working parser; does not throw |
+
+**PF10 is the one that would go unnoticed.** The defaults are the first configuration
+an operator ever has, before the advisor has written a real rule. A default combination
+the factory rejected would crash the first launch during composition, and the site
+would see only "it does not open" — with no way to tell an unconfigured rule from a
+broken program. It also pins `SkuParsingSettings`' defaults against drifting into an
+invalid combination, such as a default `Length` of `0`.
+
+**PF4–PF6 test three spellings of blank, not just `null`.** An implementation checking
+only `== null` lets `""` reach `new Regex("")`, which is a *valid* pattern matching the
+empty string anywhere. Every SKU-mode scan would then parse "successfully" into an
+empty SKU and emit it — Settings reporting the rule as enabled while a run of blanks
+enters the warehouse system. A cleared text box yields `""`, not `null`, so this is the
+common case rather than the exotic one.
+
+**A blank pattern throws here and means "not enabled" in VF3, deliberately.** Parsing is
+mandatory in SKU mode: with no rule there is no SKU, so blank can only be a
+misconfiguration. Validation rules are optional, so blank is a legitimate choice.
+
+### 4.10 `SkuValidatorFactory`
+
+The symmetric half. All three validators are constructed unconditionally, because each
+already carries "not enabled means pass" in its own shape (`int?`, a nullable preset, a
+nullable pattern). Deciding enablement here too would give it two definitions.
+
+| ID | Scenario | Expected |
+|---|---|---|
+| VF1 | Fresh-install defaults | Everything passes, including `""` |
+| VF2 | `null` settings | Throws `ArgumentNullException` |
+| VF3 | Validation regex `null` / `""` / `"   "` | Not enabled; anything passes |
+| VF4 | `^[A-Z]{3}\d{8}$` configured | Enforced; mismatch reports `PatternMismatch` |
+| VF5 | `IgnoreCase` on vs. off, `Letters`, `abc` | Passes then fails — the toggle is wired through |
+| VF6 | `IgnoreCase = true`, validation regex `^[A-Z]+$`, `abc` | **Still fails** |
+| VF7 | min `9`, max `8` | Constructor's `ArgumentException` propagates |
+| VF8 | min `8` + `Numbers`, `12A` | **Both** failures, in member order |
+
+**VF6 is the load-bearing one.** This factory is the likeliest place in the project to
+leak `IgnoreCase` into the validation regex: it holds both the toggle and the pattern,
+and passing one to the other costs two characters — or prefixing `(?i)` costs four —
+and reads as consistency to whoever writes it. V5 already guards the rule from the
+validator's side by giving `RegexSkuValidator` no case parameter at all; VF6 guards it
+from the factory's, because the factory can route around that without touching the
+validator. The scope of §9.2's toggle is now caged from four directions: C3/C4, C10a/C10b,
+V5, VF6.
+
+**VF8 does not duplicate P7.** P7 verified the combining logic with stub validators and
+never goes through a factory, so a factory that wired up only the length rule would
+leave P7 green. VF8 verifies that several validators actually get in, and pins their
+order — length, character set, regex — so the same combination of problems always looks
+the same on the error screen.
+
+**VF3's danger is subtler than PF4–PF6's.** An `""` pattern accepted as an enabled rule
+matches everything, so Settings reports validation as on while nothing is checked. That
+is worse than being off: operator and advisor both believe a safeguard exists, and find
+out otherwise only when wrong SKUs surface downstream.
+
 ---
 
 ## 5. Task 3 — Settings and persistence
@@ -357,6 +436,57 @@ This is the argument for verifying every guard by injecting the violation it exi
 
 **Corrupt files are renamed, never overwritten or deleted.** The parsing rule and scanner binding are configured remotely by the technical advisor and cannot be restored by the operator; destroying them because a file broke would be the worst possible response. S25 additionally pins that a second corruption does not overwrite the first backup, since the earliest copy is the last complete configuration before things went wrong.
 
+### 5.5 Later additions — S29–S31
+
+Added after the first pass through Task 3. S30 and S31 close a genuine defect; S29
+closes a case of the application reporting something it had not verified.
+
+| ID | Scenario | Expected |
+|---|---|---|
+| S29 | Corruption recurs while the rename itself fails | Defaults still load; `SettingsRecovered` still raised; `BackupPath` is **null** |
+| S30 | A section written as an explicit `null` (each of the four in turn) | That section loads as its default instance; **not** treated as corruption |
+| S31 | Every non-nullable settings section, assigned `null` by reflection | Reads back non-null |
+
+S29–S31 run as **6 executions**, S30 being a four-row `[Theory]`.
+
+**S30 and S31 close a real defect, not a hypothetical one.** .NET 8's
+`System.Text.Json` ignores nullability annotations entirely — `RespectNullableAnnotations`
+arrives in .NET 9 — so `{"SchemaVersion":1,"Hotkeys":null}` deserializes happily and
+overwrites the property initializer with `null`. `Load` then returns an object that
+looks fine and is half empty, against `ISettingsStore`'s promise to always return
+something usable. Nothing in Phase A reads those sections, so the fault cannot surface
+here; it surfaces in Phase B as a null reference on `settings.Hotkeys.ToggleMode` — the
+station fails to start while the configuration file looks perfectly normal.
+
+Per the established spirit of S26, an explicit `null` and an absent field are the same
+thing: neither carries usable content, and both take the default. The fix is a
+null-coalescing setter on each non-nullable section, which is where the project's other
+invariants live too — enforced by construction rather than by a caller remembering.
+
+**S30 and S31 are two sides of one invariant and both are needed.** S30 checks the
+behavior through the JSON path and would stay green under a different serializer or
+against a hand-written `new AppSettings { Hotkeys = null! }`. S31 checks the type
+directly and, in exchange, extends automatically to any section added later — no one
+has to remember to add a case, and a guard that depends on remembering eventually
+misses one. S31 additionally asserts that its own filter selected something, so a
+mistaken filter cannot leave it green while testing nothing.
+
+Verified by reverting the setter on `Hotkeys` alone: S31 and S30's `Hotkeys` row fail
+together, and only that row — the other three stay green, which is what makes the
+failure say *which* section regressed.
+
+**S29 applies §19.1's rule to diagnostics.** A failed backup is swallowed deliberately,
+and that trade is right: halting the station because a *backup* failed would plainly be
+worse. But reporting a path regardless of outcome writes "the original was backed up to
+X" into the log for an X that was never created, sending an engineer on a wasted search
+and leaving them believing the original survived — so they stop looking for it
+elsewhere. Spec §19.1's "never display a state that has not been verified" is written
+about the hook and applies here equally. Expressed as a nullable, a reader cannot obtain
+a path that is not there.
+
+Verified by passing the path unconditionally: S29 fails, reporting the very
+`settings.corrupt-1.json` that does not exist.
+
 ---
 
 ## 6. Out of scope for Phase A
@@ -376,8 +506,8 @@ Deferred to Phase B, on Windows with real hardware. Do not simulate these with u
 
 ## 7. Summary
 
-113 xUnit executions across three tasks, all green on macOS. Phase A is complete.
+137 xUnit executions across three tasks, all green on macOS and on Windows. **Tasks 1–3 are complete**; Phase A still owes Tasks 6, 7a, 8a and 5a, which get their own test plan (see §6).
 
-Two of them do disproportionate work. **R8/V4** force parse and validation timeouts to carry a reason code distinct from a plain non-match, which is what makes an on-site rule problem diagnosable. **D5/D6** keep user-facing text out of `Core`, without which the Chinese UI cannot be correct and the defect stays hidden until localization begins.
+A few carry disproportionate weight. **R8/V4** force parse and validation timeouts to carry a reason code distinct from a plain non-match, which is what makes an on-site rule problem diagnosable. **D5/D6** keep user-facing text out of `Core`, without which the Chinese UI cannot be correct and the defect stays hidden until localization begins. **S30/S31** are the only cases here that closed a defect capable of stopping a station from starting, and it was invisible from inside Phase A. **VF6** stands where the ignore-case toggle is most likely to be widened by someone acting in good faith.
 
 The layering guards A1–A3 matter most later rather than now: they are cheap today and become the thing that stops `Core` from acquiring a Windows dependency once the Phase B projects exist.

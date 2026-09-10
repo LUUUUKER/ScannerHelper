@@ -294,24 +294,35 @@ public sealed class JsonSettingsStore : ISettingsStore
     ///   输入：reason 该文件为何无法使用。输出：默认配置。
     ///   步骤：
     ///     1. 生成一个不会覆盖已有备份的备份路径；
-    ///     2. 把原文件改名过去；
-    ///     3. 触发 SettingsRecovered 事件；
+    ///     2. 把原文件改名过去，并记下是否成功；
+    ///     3. 触发 SettingsRecovered 事件，**只在备份确实成功时**带上路径；
     ///     4. 返回默认配置。
     ///
-    ///   步骤 2 若也失败（例如目录只读），不再抛异常，而是继续返回默认值。
+    ///   步骤 2 若失败（例如目录只读），不再抛异常，而是继续返回默认值。
     ///   此时程序仍能启动，只是原文件没能备份成——比起因为"备份失败"而让
     ///   整个工位起不来，这个取舍是明确的。
+    ///
+    ///   步骤 3 在失败时传 null 而不是照样传路径：否则日志会写下"原文件已备份
+    ///   到 X"，而 X 根本不存在，工程师照着去找只会白跑一趟，还会误以为原配置
+    ///   还留着。规格 §19.1 那条"绝不显示未经验证的状态"同样适用于诊断信息。
     ///
     /// English:
     ///   Backs up an unusable file and returns defaults.
     ///   Steps: (1) build a backup path that will not overwrite an existing one;
-    ///   (2) rename the original there; (3) raise SettingsRecovered; (4) return
-    ///   defaults.
+    ///   (2) rename the original there, recording whether it worked; (3) raise
+    ///   SettingsRecovered, carrying the path *only if the backup actually
+    ///   succeeded*; (4) return defaults.
     ///
-    ///   If step 2 itself fails — a read-only directory, say — nothing is thrown and
-    ///   defaults are still returned. The application starts, merely without having
-    ///   preserved the original. Halting the whole station because a *backup* failed
-    ///   would be the worse trade.
+    ///   If step 2 fails — a read-only directory, say — nothing is thrown and defaults
+    ///   are still returned. The application starts, merely without having preserved
+    ///   the original. Halting the whole station because a *backup* failed would be the
+    ///   worse trade.
+    ///
+    ///   Step 3 passes null on failure rather than the path anyway: otherwise the log
+    ///   would record "the original was backed up to X" for an X that does not exist,
+    ///   sending an engineer on a wasted search and leaving them believing the original
+    ///   configuration survived. Spec §19.1's "never display an unverified state"
+    ///   applies to diagnostics too.
     /// </summary>
     private AppSettings RecoverFrom(SettingsRecoveryReason reason)
     {
@@ -319,9 +330,11 @@ public sealed class JsonSettingsStore : ISettingsStore
         var backupPath = BuildBackupPath();
 
         // 步骤 2 / Step 2
+        var backupSucceeded = false;
         try
         {
             _fileSystem.MoveFile(_settingsFilePath, backupPath, overwrite: false);
+            backupSucceeded = true;
         }
         catch
         {
@@ -329,7 +342,9 @@ public sealed class JsonSettingsStore : ISettingsStore
         }
 
         // 步骤 3 / Step 3
-        SettingsRecovered?.Invoke(this, new SettingsRecoveredEventArgs(backupPath, reason));
+        SettingsRecovered?.Invoke(
+            this,
+            new SettingsRecoveredEventArgs(backupSucceeded ? backupPath : null, reason));
 
         // 步骤 4 / Step 4
         return new AppSettings();

@@ -58,6 +58,8 @@
 //   Repeated_corruption_does_not_overwrite_earlier_backup S25
 //   Missing_field_takes_its_default                       S26
 //   Unknown_fields_are_ignored                            S27
+//   Failed_backup_is_reported_as_a_null_backup_path       S29
+//   Explicitly_null_section_loads_as_its_default          S30
 // =============================================================================
 
 using System.Text.Json;
@@ -454,6 +456,7 @@ public sealed class JsonSettingsStoreTests : IDisposable
             $"{caseId}: 恢复原因应为 {expectedReason}，实际为 {recovery.Reason}");
 
         // 原文件被改名备份，内容原封不动 / original renamed, contents untouched
+        Assert.NotNull(recovery.BackupPath);
         Assert.True(File.Exists(recovery.BackupPath), $"{caseId}: 原文件必须被备份而非销毁");
         Assert.Equal(fileContent, File.ReadAllText(recovery.BackupPath));
         Assert.False(File.Exists(SettingsFilePath), $"{caseId}: 损坏的文件应被移走");
@@ -480,10 +483,10 @@ public sealed class JsonSettingsStoreTests : IDisposable
         Directory.CreateDirectory(_temporaryDirectory);
 
         File.WriteAllText(SettingsFilePath, "first corruption");
-        var firstBackup = LoadAndCaptureRecovery().BackupPath;
+        var firstBackup = LoadAndCaptureBackupPath();
 
         File.WriteAllText(SettingsFilePath, "second corruption");
-        var secondBackup = LoadAndCaptureRecovery().BackupPath;
+        var secondBackup = LoadAndCaptureBackupPath();
 
         Assert.NotEqual(firstBackup, secondBackup);
         Assert.Equal("first corruption", File.ReadAllText(firstBackup));
@@ -560,10 +563,163 @@ public sealed class JsonSettingsStoreTests : IDisposable
     }
 
     /// <summary>
-    /// 中文：执行一次 Load 并捕获它发出的恢复事件，供 S25 复用。
-    /// English: Runs one Load and captures the recovery event it raises, for S25.
+    /// 中文：
+    ///   S29 — 备份没做成时，恢复事件里的备份路径必须为 null。
+    ///   输入：无。输出：无（断言）。
+    ///   步骤：
+    ///     1. 放一份损坏的配置；
+    ///     2. 换用一个改名必定失败的文件系统（模拟目录只读）执行 Load；
+    ///     3. 断言 Load 没有抛异常，仍然返回默认值——备份失败不该让程序起不来；
+    ///     4. 断言恢复事件仍然发出，原因码正确；
+    ///     5. 断言事件里的 BackupPath 为 **null**。
+    ///
+    ///   ★ 第 5 步是本条存在的全部理由。备份失败被有意吞掉（第 3 步的取舍是
+    ///     对的：为一次备份失败让整个工位起不来显然更糟），但它绝不能被悄悄
+    ///     抹平。若无论成败都报一个路径，日志上就会写着"原文件已备份到 X"，
+    ///     而 X 根本不存在——工程师照着去找白跑一趟，还会误以为原配置还留着，
+    ///     从而放弃去别处找回它。
+    ///
+    ///     规格 §19.1 那条设计规则"程序绝不能显示一个自己没验证过的状态"
+    ///     写的是 hook，但诊断信息同样适用。用可空类型表达之后，读取方根本
+    ///     拿不到一个不存在的路径。
+    ///
+    /// English:
+    ///   S29 — when the backup did not happen, the recovery event carries a null path.
+    ///   Steps: write a corrupt file; Load through a file system whose rename always
+    ///   fails (a read-only directory); assert Load still returns defaults without
+    ///   throwing, still raises the event with the right reason, and reports a null
+    ///   backup path.
+    ///
+    ///   Step 5 is the whole reason this test exists. The failed backup is swallowed
+    ///   deliberately — halting the station because a *backup* failed would plainly be
+    ///   worse — but it must not be papered over. Reporting a path regardless would
+    ///   write "the original was backed up to X" into the log for an X that does not
+    ///   exist, sending an engineer on a wasted search and leaving them believing the
+    ///   original survived, so they stop looking for it elsewhere.
+    ///
+    ///   Spec §19.1's rule — never display a state that has not been verified — is
+    ///   written about the hook but applies to diagnostics just as much. As a
+    ///   nullable, a reader simply cannot obtain a path that is not there.
     /// </summary>
-    private SettingsRecoveredEventArgs LoadAndCaptureRecovery()
+    [Fact]
+    public void Failed_backup_is_reported_as_a_null_backup_path()
+    {
+        // 步骤 1 / Step 1
+        Directory.CreateDirectory(_temporaryDirectory);
+        File.WriteAllText(SettingsFilePath, "{{{");
+
+        // 步骤 2 / Step 2
+        var store = CreateStore(new FailingMoveFileSystem());
+        var recoveryEvents = new List<SettingsRecoveredEventArgs>();
+        store.SettingsRecovered += (_, eventArgs) => recoveryEvents.Add(eventArgs);
+
+        var settings = store.Load();
+
+        // 步骤 3 / Step 3
+        Assert.True(settings.ModeSwitchSoundEnabled);
+
+        // 步骤 4 / Step 4
+        var recovery = Assert.Single(recoveryEvents);
+        Assert.Equal(SettingsRecoveryReason.Malformed, recovery.Reason);
+
+        // 步骤 5 / Step 5
+        Assert.True(recovery.BackupPath is null,
+            "备份失败时不得报告一个不存在的备份路径，否则日志会声称原配置已保留。"
+            + $" 实际报告：{recovery.BackupPath}");
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   S30 — 配置文件中把某个分组显式写成 null 时，读回来仍是默认实例。
+    ///   输入：sectionName 被置空的分组名。输出：无（断言）。
+    ///
+    ///   ★ 这条堵的是一个真实存在的洞，不是假想的边界情况。
+    ///
+    ///     .NET 8 的 System.Text.Json **完全忽略可空性标注**
+    ///     （RespectNullableAnnotations 要到 .NET 9 才有）。因此
+    ///         {"SchemaVersion":1,"Hotkeys":null}
+    ///     能被正常反序列化，AppSettings 里属性初始化器建好的实例会被 null
+    ///     覆盖掉。Load 于是返回一个"看起来正常、其实半空"的对象，而
+    ///     ISettingsStore 承诺的是"永不失败、永远返回可用配置"。
+    ///
+    ///     这个洞不会在 Phase A 暴露——Core 里没人访问这些分组。它会在
+    ///     Phase B 以 settings.Hotkeys.ToggleMode 的空引用异常爆出来，
+    ///     表现为工位起不来，而配置文件看上去完全正常。
+    ///
+    ///   按 S26 的既定精神，显式 null 与"字段不存在"是同一件事：都表示这一段
+    ///   没有有效内容，都该退回默认值。两条测试合起来覆盖了缺字段的两种写法。
+    ///
+    ///   四个分组逐个测而不是只测一个：漏掉其中某一个的属性写法，与四个全漏
+    ///   在故障现场看起来完全一样，但只有逐个断言才能定位是哪一个。
+    ///
+    /// English:
+    ///   S30 — a section written as an explicit null still loads as a default instance.
+    ///
+    ///   This closes a real hole rather than a hypothetical edge case. .NET 8's
+    ///   System.Text.Json ignores nullability annotations entirely
+    ///   (RespectNullableAnnotations arrives in .NET 9), so
+    ///   {"SchemaVersion":1,"Hotkeys":null} deserializes happily and overwrites the
+    ///   property initializer with null. Load then returns an object that looks fine
+    ///   and is half empty, against ISettingsStore's promise to always return
+    ///   something usable.
+    ///
+    ///   The hole cannot surface in Phase A, where nothing in Core reads these
+    ///   sections. It surfaces in Phase B as a null reference on
+    ///   settings.Hotkeys.ToggleMode — the station fails to start while the
+    ///   configuration file looks perfectly normal.
+    ///
+    ///   Per the established spirit of S26, an explicit null and an absent field are
+    ///   the same thing: neither carries usable content, and both take the default.
+    ///   Together the two tests cover both spellings of "this field is missing".
+    ///
+    ///   All four sections are tested individually rather than just one: missing the
+    ///   fix on a single section looks identical in the field to missing all four, and
+    ///   only per-section assertions say which.
+    /// </summary>
+    [Theory]
+    [InlineData("Hotkeys")]
+    [InlineData("SkuParsing")]
+    [InlineData("SkuValidation")]
+    [InlineData("Diagnostics")]
+    public void Explicitly_null_section_loads_as_its_default(string sectionName)
+    {
+        Directory.CreateDirectory(_temporaryDirectory);
+        File.WriteAllText(SettingsFilePath, $$"""{"SchemaVersion":1,"{{sectionName}}":null}""");
+
+        var store = CreateStore();
+        var recoveryEvents = new List<SettingsRecoveredEventArgs>();
+        store.SettingsRecovered += (_, eventArgs) => recoveryEvents.Add(eventArgs);
+
+        var settings = store.Load();
+
+        // 不算损坏：一个分组为 null 与该分组缺失等价，不该丢掉整份配置
+        // Not corruption: a null section equals an absent one and must not discard
+        // the whole configuration
+        Assert.Empty(recoveryEvents);
+
+        // 四个分组一律非空，且取到各自的默认值
+        // Every section is non-null and carries its own defaults
+        Assert.NotNull(settings.Hotkeys);
+        Assert.NotNull(settings.SkuParsing);
+        Assert.NotNull(settings.SkuValidation);
+        Assert.NotNull(settings.Diagnostics);
+
+        Assert.Equal("F8", settings.Hotkeys.ToggleMode);
+        Assert.Equal(SkuParsingRuleType.FixedPosition, settings.SkuParsing.RuleType);
+        Assert.True(settings.SkuValidation.IgnoreCase);
+        Assert.Equal(14, settings.Diagnostics.LogRetentionDays);
+    }
+
+    /// <summary>
+    /// 中文：执行一次 Load，捕获它发出的恢复事件，并返回其中的备份路径，供 S25 复用。
+    ///       备份路径为可空——null 表示备份没做成（见 S29）。本辅助方法断言它非空，
+    ///       因为 S25 的前提就是两次备份都成功了。
+    /// English: Runs one Load, captures the recovery event, and returns its backup
+    ///          path, for S25. The path is nullable — null means the backup did not
+    ///          happen (see S29) — and this helper asserts it is not, since S25's
+    ///          premise is that both backups succeeded.
+    /// </summary>
+    private string LoadAndCaptureBackupPath()
     {
         var store = CreateStore();
         SettingsRecoveredEventArgs? captured = null;
@@ -572,7 +728,8 @@ public sealed class JsonSettingsStoreTests : IDisposable
         store.Load();
 
         Assert.NotNull(captured);
-        return captured;
+        Assert.NotNull(captured.BackupPath);
+        return captured.BackupPath;
     }
 
     /// <summary>
@@ -635,5 +792,48 @@ public sealed class JsonSettingsStoreTests : IDisposable
 
             throw new IOException("模拟写到一半失败 / simulated failure part-way through a write");
         }
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   模拟"改名失败"的文件系统，其余操作照常委托给真实实现。供 S29 使用。
+    ///
+    ///   对应的真实场景是配置目录只读，或原文件被别的进程占用——此时损坏的
+    ///   配置备份不下来。程序仍应正常启动（用默认值），但绝不能报告一个不存在
+    ///   的备份路径。
+    ///
+    ///   与 FailingWriteFileSystem 分成两个类而不是合成一个可配置的假实现：
+    ///   两者模拟的是不同的故障，各自只失败一个动作，读起来一眼就知道在测什么。
+    ///
+    /// English:
+    ///   A file system whose rename always fails, delegating everything else to the
+    ///   real one. Used by S29.
+    ///
+    ///   The real-world case is a read-only configuration directory, or the original
+    ///   file held open by another process, so a corrupt config cannot be backed up.
+    ///   The application must still start on defaults — but must never report a backup
+    ///   path that does not exist.
+    ///
+    ///   Kept separate from FailingWriteFileSystem rather than merged into one
+    ///   configurable fake: they simulate different faults, each fails exactly one
+    ///   operation, and which one is under test is visible at a glance.
+    /// </summary>
+    private sealed class FailingMoveFileSystem : ISettingsFileSystem
+    {
+        private readonly SystemSettingsFileSystem _real = new();
+
+        public bool FileExists(string path) => _real.FileExists(path);
+
+        public string ReadAllText(string path) => _real.ReadAllText(path);
+
+        public void WriteAllText(string path, string contents) => _real.WriteAllText(path, contents);
+
+        public void CreateDirectory(string directoryPath) => _real.CreateDirectory(directoryPath);
+
+        public void DeleteFile(string path) => _real.DeleteFile(path);
+
+        public void MoveFile(string sourcePath, string destinationPath, bool overwrite)
+            => throw new UnauthorizedAccessException(
+                "模拟目录只读导致改名失败 / simulated rename failure on a read-only directory");
     }
 }

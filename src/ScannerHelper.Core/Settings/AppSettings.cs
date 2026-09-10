@@ -26,6 +26,26 @@
 //   这份文件是哪个版本的产物；等到需要迁移时才加，就已经有一批没有版本号
 //   的文件散落在各台机器上了。
 //
+//   ★ 几个**不可为空**的分组（Hotkeys、SkuParsing、SkuValidation、Diagnostics）
+//     的 setter 都会把 null 折成一个默认实例，而不是原样存下。
+//
+//     这不是防御性编程的惯性，而是堵一个真实的洞：.NET 8 的
+//     System.Text.Json **完全忽略可空性标注**（RespectNullableAnnotations 要到
+//     .NET 9 才有）。因此一份内容为
+//         {"SchemaVersion":1,"Hotkeys":null}
+//     的配置能被正常反序列化，属性初始化器建好的实例会被 null 覆盖，
+//     Load 于是返回一个"看起来正常、其实半空"的对象——而 ISettingsStore
+//     承诺的是"永不失败、永远返回可用配置"。到 Phase B 才会以
+//     settings.Hotkeys.ToggleMode 的空引用异常爆出来，表现为工位起不来。
+//
+//     按测试 S26 的既定精神（缺字段取默认值），显式的 null 与"字段不存在"
+//     是同一件事，都该退回默认值。把这条不变式放在 setter 上而不是放在
+//     JsonSettingsStore 里，是因为前者对**任何**赋值路径都成立——将来换一个
+//     序列化器、或者有人手写 new AppSettings { Hotkeys = null! }，都无法绕开。
+//
+//     可空的三项（ScannerBinding、FullWindowBounds、CompactWindowBounds）
+//     不做这个处理：那里的 null 是有意义的取值，表示"尚未绑定""尚无记录"。
+//
 // English:
 //   Root object for all user preferences (spec §14).
 //
@@ -49,6 +69,26 @@
 //   must know which version a file came from; adding the field only once migration
 //   is needed leaves a population of unversioned files already on the machines.
 //
+//   The four non-nullable sections (Hotkeys, SkuParsing, SkuValidation, Diagnostics)
+//   fold a null assignment into a default instance rather than storing it. This is
+//   not defensive habit but a real hole: .NET 8's System.Text.Json ignores
+//   nullability annotations entirely (RespectNullableAnnotations arrives in .NET 9),
+//   so {"SchemaVersion":1,"Hotkeys":null} deserializes happily and overwrites the
+//   property initializer with null. Load would then return an object that looks fine
+//   and is half empty, against ISettingsStore's promise of always returning something
+//   usable — surfacing in Phase B as a null reference on settings.Hotkeys.ToggleMode,
+//   which means the station does not start.
+//
+//   Per the established spirit of test S26 (a missing field takes its default), an
+//   explicit null and an absent field are the same thing. The invariant lives on the
+//   setter rather than in JsonSettingsStore because it then holds for *every*
+//   assignment path — a different serializer later, or a hand-written
+//   new AppSettings { Hotkeys = null! }, cannot route around it.
+//
+//   The three nullable members (ScannerBinding, FullWindowBounds, CompactWindowBounds)
+//   are left alone: null is a meaningful value there, meaning "nothing bound yet" and
+//   "nothing recorded yet".
+//
 // 包含的类型 / Types in this file:
 //   AppSettings
 // =============================================================================
@@ -62,6 +102,11 @@ namespace ScannerHelper.Core.Settings;
 /// </summary>
 public sealed class AppSettings
 {
+    private HotkeySettings _hotkeys = new();
+    private SkuParsingSettings _skuParsing = new();
+    private SkuValidationSettings _skuValidation = new();
+    private DiagnosticsSettings _diagnostics = new();
+
     /// <summary>
     /// 中文：配置结构版本，从 V1 起为 1。用于将来的格式迁移。
     ///       读到比程序更高的版本按损坏处理（决策 D-8）——猜测未来格式会
@@ -154,10 +199,15 @@ public sealed class AppSettings
     public WindowBounds? CompactWindowBounds { get; set; }
 
     /// <summary>
-    /// 中文：全局控制热键（规格 §13.3）。
-    /// English: The global control hotkeys (spec §13.3).
+    /// 中文：全局控制热键（规格 §13.3）。赋 null 会被折成默认实例，见文件头说明。
+    /// English: The global control hotkeys (spec §13.3). Assigning null folds into a
+    ///          default instance; see the file header.
     /// </summary>
-    public HotkeySettings Hotkeys { get; set; } = new();
+    public HotkeySettings Hotkeys
+    {
+        get => _hotkeys;
+        set => _hotkeys = value ?? new HotkeySettings();
+    }
 
     /// <summary>
     /// 中文：已绑定的扫码枪身份，null 表示尚未绑定（规格 §6）。
@@ -166,20 +216,35 @@ public sealed class AppSettings
     public ScannerBindingSettings? ScannerBinding { get; set; }
 
     /// <summary>
-    /// 中文：SKU 解析规则（规格 §8）。
-    /// English: SKU parsing configuration (spec §8).
+    /// 中文：SKU 解析规则（规格 §8）。赋 null 会被折成默认实例，见文件头说明。
+    /// English: SKU parsing configuration (spec §8). Assigning null folds into a
+    ///          default instance; see the file header.
     /// </summary>
-    public SkuParsingSettings SkuParsing { get; set; } = new();
+    public SkuParsingSettings SkuParsing
+    {
+        get => _skuParsing;
+        set => _skuParsing = value ?? new SkuParsingSettings();
+    }
 
     /// <summary>
-    /// 中文：SKU 校验规则（规格 §9）。
-    /// English: SKU validation configuration (spec §9).
+    /// 中文：SKU 校验规则（规格 §9）。赋 null 会被折成默认实例，见文件头说明。
+    /// English: SKU validation configuration (spec §9). Assigning null folds into a
+    ///          default instance; see the file header.
     /// </summary>
-    public SkuValidationSettings SkuValidation { get; set; } = new();
+    public SkuValidationSettings SkuValidation
+    {
+        get => _skuValidation;
+        set => _skuValidation = value ?? new SkuValidationSettings();
+    }
 
     /// <summary>
-    /// 中文：诊断日志配置（规格 §15）。
-    /// English: Diagnostic logging configuration (spec §15).
+    /// 中文：诊断日志配置（规格 §15）。赋 null 会被折成默认实例，见文件头说明。
+    /// English: Diagnostic logging configuration (spec §15). Assigning null folds into
+    ///          a default instance; see the file header.
     /// </summary>
-    public DiagnosticsSettings Diagnostics { get; set; } = new();
+    public DiagnosticsSettings Diagnostics
+    {
+        get => _diagnostics;
+        set => _diagnostics = value ?? new DiagnosticsSettings();
+    }
 }

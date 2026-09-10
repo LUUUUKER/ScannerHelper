@@ -16,6 +16,17 @@
 //   事件里带上备份路径，是为了让诊断信息可直接行动——工程师看到日志就知道
 //   去哪儿找原文件，而不必自己去猜备份的命名规则。
 //
+//   ★ 备份路径是**可空**的，null 表示这次连备份都没做成（例如目录只读）。
+//
+//     备份失败不会阻止程序启动——那个取舍是对的，为了一次备份失败让整个
+//     工位起不来显然更糟。但它绝不能被悄悄抹平：如果无论成败都报一个路径，
+//     日志上就会写着"原文件已备份到 X"，而 X 根本不存在，工程师照着去找
+//     只会浪费时间，还会以为原配置还留着。
+//
+//     规格 §19.1 的那条设计规则——"程序绝不能显示一个自己没验证过的状态"
+//     ——讲的是 hook，但道理同样适用于诊断信息。用可空类型表达，读取方
+//     根本拿不到一个不存在的路径。
+//
 // English:
 //   The recovery event raised when a settings file cannot be used (spec §14, §15).
 //
@@ -33,6 +44,19 @@
 //   The backup path travels with the event so the diagnostic is directly
 //   actionable: an engineer reading the log knows where the original went without
 //   having to guess the naming convention.
+//
+//   That path is nullable, and null means the backup itself did not happen — a
+//   read-only directory, say. A failed backup must not prevent startup, and that
+//   trade is right: halting the station because a *backup* failed would plainly be
+//   worse. But it must not be papered over either. Reporting a path regardless of
+//   outcome would write "the original was backed up to X" into the log when X does
+//   not exist, sending an engineer to look for a file that was never written and
+//   leaving them believing the original configuration survived.
+//
+//   Spec §19.1's design rule — never display a confident state that has not been
+//   verified — is written about the hook, but it applies to diagnostics just as
+//   much. Expressed as a nullable, a reader simply cannot obtain a path that is not
+//   there.
 //
 // 包含的类型 / Types in this file:
 //   SettingsRecoveryReason      为什么这份配置无法使用
@@ -83,12 +107,16 @@ public enum SettingsRecoveryReason
 /// English: The details of one settings recovery.
 /// </summary>
 /// <param name="BackupPath">
-/// 中文：原配置被改名保存到的位置。文件内容原封不动，供人工恢复或事后分析。
-/// English: Where the original was renamed to. Its content is untouched, available
-///          for manual recovery or later analysis.
+/// 中文：原配置被改名保存到的位置，文件内容原封不动，供人工恢复或事后分析。
+///       **为 null 表示备份没有做成**，原文件的去向不确定——不要据此告诉用户
+///       "原配置已保留"。
+/// English: Where the original was renamed to; its content is untouched and available
+///          for manual recovery or later analysis. **null means the backup did not
+///          happen**, so the original's fate is unknown — do not tell the user their
+///          configuration was preserved on the strength of this event.
 /// </param>
 /// <param name="Reason">
 /// 中文：这份配置为什么无法使用。
 /// English: Why the file could not be used.
 /// </param>
-public sealed record SettingsRecoveredEventArgs(string BackupPath, SettingsRecoveryReason Reason);
+public sealed record SettingsRecoveredEventArgs(string? BackupPath, SettingsRecoveryReason Reason);
