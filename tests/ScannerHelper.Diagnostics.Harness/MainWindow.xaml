@@ -53,6 +53,14 @@
                     <Button x:Name="SerialButton" Content="虚拟串口验证 / Virtual COM"
                             Width="200" Height="28" Margin="8,0,0,0" Click="OnSerialClicked" />
 
+                    <!--
+                        中文：新架构的完整链路。它同样不碰键盘输入，只往外发。
+                        English: The complete chain under the new architecture. It likewise touches
+                                 no keyboard input and only emits.
+                    -->
+                    <Button x:Name="EndToEndButton" Content="端到端 / End-to-end"
+                            Width="170" Height="28" Margin="8,0,0,0" Click="OnEndToEndClicked" />
+
                     <TextBlock x:Name="StatusText" VerticalAlignment="Center" Margin="16,0,0,0"
                                Text="未开始 / Not started" />
                 </StackPanel>

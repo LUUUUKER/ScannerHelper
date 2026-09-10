@@ -111,6 +111,14 @@ public partial class MainWindow : Window
     private SerialWindow? _serialWindow;
 
     /// <summary>
+    /// 中文：打开着的端到端窗口，null 表示没开。同样只允许一个：两个窗口会抢
+    ///       同一个串口，而后开的那个只会得到「端口被占用」。
+    /// English: The open end-to-end window, or null. Only one is allowed: two would contend for
+    ///          the same port and the second would only ever see "port in use".
+    /// </summary>
+    private EndToEndWindow? _endToEndWindow;
+
+    /// <summary>
     /// 中文：第一个事件的时间戳，用于把日志里的时间显示成相对毫秒。
     ///       绝对的 Stopwatch 读数对人毫无意义，相对时间才能看出"这几个字符
     ///       是连着来的"。
@@ -241,6 +249,24 @@ public partial class MainWindow : Window
         var window = new SerialWindow { Owner = this };
         _serialWindow = window;
         window.Closed += (_, _) => _serialWindow = null;
+        window.Show();
+    }
+
+    /// <summary>
+    /// 中文：打开端到端窗口：串口 → 处理 → 输出，新架构的完整链路。
+    /// English: Opens the end-to-end window: serial, processed, typed out.
+    /// </summary>
+    private void OnEndToEndClicked(object sender, RoutedEventArgs e)
+    {
+        if (_endToEndWindow is not null)
+        {
+            _endToEndWindow.Activate();
+            return;
+        }
+
+        var window = new EndToEndWindow { Owner = this };
+        _endToEndWindow = window;
+        window.Closed += (_, _) => _endToEndWindow = null;
         window.Show();
     }
 

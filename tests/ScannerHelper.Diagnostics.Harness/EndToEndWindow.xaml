@@ -1,0 +1,172 @@
+<Window x:Class="ScannerHelper.Diagnostics.Harness.EndToEndWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="Scanner Helper — 端到端 / End-to-end (串口 → 处理 → 输出)"
+        Width="1180" Height="760" MinWidth="920" MinHeight="600"
+        Closing="OnWindowClosing">
+
+    <!--
+        中文：
+          这是新架构的第一条完整链路：串口读到一枪 → 按模式处理 → SendInput 发给
+          业务软件。它也是正式界面的雏形。
+
+          ★ 它**不碰键盘的输入**：不装钩子、不吞任何按键。它只往外发。
+            所以「程序把键盘搞坏了」这一整类事故在这里不可能发生。
+
+          ★ 但它**会真的往当前焦点所在的程序里打字**。所以输出默认关闭，
+            要显式勾选才启用——先看着结果对不对，再决定要不要真的发出去。
+
+          布局自上而下就是操作顺序：连接 → 启用输出 → 设模式 → 扫码 → 看结果。
+        English:
+          The first complete chain under the new architecture: a scan arrives on the serial port,
+          is processed under the current mode, and is sent to the business application through
+          SendInput. It doubles as the prototype for the real UI.
+
+          It touches no keyboard input — no hook, nothing swallowed — so the whole class of "the
+          program broke my keyboard" accidents cannot happen here. It does, however, really type
+          into whatever has focus, so output is off until explicitly enabled: watch the results
+          first, then decide whether to actually send them.
+    -->
+
+    <DockPanel Margin="10">
+
+        <Border DockPanel.Dock="Top" Background="#E3F2FD" BorderBrush="#5B8FC7"
+                BorderThickness="1" CornerRadius="3" Padding="10" Margin="0,0,0,8">
+            <StackPanel>
+                <TextBlock FontWeight="Bold" Foreground="#0D3C61"
+                           Text="串口进 → 按模式处理 → 发给业务软件 / Serial in, processed, typed out" />
+                <TextBlock TextWrapping="Wrap" Margin="0,4,0,0" Foreground="#1B3A52"
+                           Text="本窗口不装钩子、不吞任何按键，键盘完全不受影响。但勾上「启用输出」之后，它会真的往当前焦点所在的程序里打字——所以默认关闭：先在下面的列表里看结果对不对，再决定要不要发出去。" />
+            </StackPanel>
+        </Border>
+
+        <Border DockPanel.Dock="Top" BorderBrush="#D0D0D0" BorderThickness="0,0,0,1"
+                Padding="0,0,0,8" Margin="0,0,0,8">
+            <StackPanel>
+
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Text="端口 / Port:" VerticalAlignment="Center" />
+                    <ComboBox x:Name="PortCombo" Width="120" Height="26" Margin="6,0,0,0" />
+                    <Button x:Name="RefreshPortsButton" Content="重新列出 / Refresh" Width="140" Height="26"
+                            Margin="6,0,0,0" Click="OnRefreshPortsClicked" />
+                    <TextBlock Text="波特率 / Baud:" VerticalAlignment="Center" Margin="14,0,0,0" />
+                    <ComboBox x:Name="BaudCombo" Width="100" Height="26" Margin="6,0,0,0" SelectedIndex="0">
+                        <ComboBoxItem Content="9600" />
+                        <ComboBoxItem Content="115200" />
+                        <ComboBoxItem Content="19200" />
+                        <ComboBoxItem Content="38400" />
+                        <ComboBoxItem Content="57600" />
+                    </ComboBox>
+                    <Button x:Name="ConnectButton" Content="连接 / Connect" Width="130" Height="28"
+                            Margin="14,0,0,0" Click="OnConnectClicked" />
+                    <Button x:Name="DisconnectButton" Content="断开 / Disconnect" Width="130" Height="28"
+                            Margin="6,0,0,0" Click="OnDisconnectClicked" IsEnabled="False" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <CheckBox x:Name="OutputEnabledCheck" VerticalAlignment="Center"
+                              Content="启用输出 —— 会真的往业务软件里打字 / Enable output"
+                              Checked="OnOutputEnabledChanged" Unchecked="OnOutputEnabledChanged" />
+                    <Border Width="1" Background="#D0D0D0" Margin="14,2,14,2" />
+                    <TextBlock Text="模式 / Mode:" VerticalAlignment="Center" />
+                    <TextBlock x:Name="ModeText" Text="SN" FontWeight="Bold" Margin="6,0,0,0"
+                               VerticalAlignment="Center" />
+                    <Button x:Name="ToggleModeButton" Content="切换 SN/SKU" Width="130" Height="26"
+                            Margin="10,0,0,0" Click="OnToggleModeClicked" />
+                    <CheckBox x:Name="AppendEnterCheck" VerticalAlignment="Center" Margin="14,0,0,0"
+                              Content="扫描后补回车 / Append Enter（默认关）"
+                              Checked="OnAppendEnterChanged" Unchecked="OnAppendEnterChanged" />
+                    <Border Width="1" Background="#D0D0D0" Margin="14,2,14,2" />
+                    <Button x:Name="PauseButton" Content="暂停 / Pause" Width="110" Height="26"
+                            Click="OnPauseClicked" />
+                    <Button x:Name="ResumeButton" Content="恢复 / Resume" Width="110" Height="26"
+                            Margin="6,0,0,0" Click="OnResumeClicked" IsEnabled="False" />
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                    <TextBlock Text="待决错误 / Pending error:" VerticalAlignment="Center" />
+                    <TextBlock x:Name="PendingErrorText" Text="无 / none" Margin="6,0,0,0"
+                               VerticalAlignment="Center" FontFamily="Consolas, Courier New, monospace" />
+                    <Button x:Name="ForceSendButton" Content="强制发送 / Force Send" Width="170" Height="26"
+                            Margin="14,0,0,0" Click="OnForceSendClicked" IsEnabled="False" />
+                    <Button x:Name="CancelButton" Content="取消 / Cancel" Width="120" Height="26"
+                            Margin="6,0,0,0" Click="OnCancelClicked" IsEnabled="False" />
+                </StackPanel>
+
+            </StackPanel>
+        </Border>
+
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="1.5*" />
+                <ColumnDefinition Width="Auto" />
+                <ColumnDefinition Width="1*" />
+            </Grid.ColumnDefinitions>
+
+            <DockPanel Grid.Column="0">
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="每一枪 / Every scan" />
+                <ListView x:Name="ScanListView" FontSize="12"
+                          FontFamily="Consolas, Courier New, monospace">
+                    <ListView.View>
+                        <GridView>
+                            <GridViewColumn Header="#" Width="42"
+                                            DisplayMemberBinding="{Binding Index}" />
+                            <GridViewColumn Header="时刻 / Time" Width="86"
+                                            DisplayMemberBinding="{Binding Time}" />
+                            <GridViewColumn Header="模式" Width="46"
+                                            DisplayMemberBinding="{Binding Mode}" />
+                            <GridViewColumn Header="收到 / Raw" Width="180"
+                                            DisplayMemberBinding="{Binding RawCode}" />
+                            <GridViewColumn Header="发出 / Emitted" Width="150"
+                                            DisplayMemberBinding="{Binding Emitted}" />
+                            <GridViewColumn Header="结局 / Result" Width="220"
+                                            DisplayMemberBinding="{Binding Result}" />
+                        </GridView>
+                    </ListView.View>
+                </ListView>
+            </DockPanel>
+
+            <GridSplitter Grid.Column="1" Width="6" HorizontalAlignment="Stretch" Background="Transparent" />
+
+            <DockPanel Grid.Column="2">
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="状态 / State" />
+                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" x:Name="StateBorder"
+                        Background="#F6F6F6">
+                    <TextBlock x:Name="StateText" FontFamily="Consolas, Courier New, monospace"
+                               FontSize="12" TextWrapping="Wrap" Text="—" />
+                </Border>
+
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="链路健康 / Link health" />
+                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" x:Name="HealthBorder"
+                        Background="#F6F6F6">
+                    <TextBlock x:Name="HealthText" FontFamily="Consolas, Courier New, monospace"
+                               FontSize="12" TextWrapping="Wrap" Text="—" />
+                </Border>
+
+                <TextBlock DockPanel.Dock="Top" Style="{StaticResource SectionHeader}"
+                           Text="SKU 规则 / SKU rule" />
+                <Border DockPanel.Dock="Top" Padding="8" CornerRadius="3" Background="#F6F6F6">
+                    <StackPanel>
+                        <TextBlock TextWrapping="Wrap" FontSize="11" Foreground="#555"
+                                   Text="固定位置截取。改完点「应用」，正在等待决定的那一枪不受影响。" />
+                        <StackPanel Orientation="Horizontal" Margin="0,6,0,0">
+                            <TextBlock Text="起始位" VerticalAlignment="Center" />
+                            <TextBox x:Name="StartPositionText" Width="50" Height="24" Margin="6,0,0,0"
+                                     Text="1" VerticalContentAlignment="Center" />
+                            <TextBlock Text="长度" VerticalAlignment="Center" Margin="10,0,0,0" />
+                            <TextBox x:Name="LengthText" Width="50" Height="24" Margin="6,0,0,0"
+                                     Text="7" VerticalContentAlignment="Center" />
+                            <Button x:Name="ApplyRuleButton" Content="应用 / Apply" Width="100" Height="24"
+                                    Margin="10,0,0,0" Click="OnApplyRuleClicked" />
+                        </StackPanel>
+                    </StackPanel>
+                </Border>
+
+                <Border />
+            </DockPanel>
+        </Grid>
+    </DockPanel>
+</Window>
