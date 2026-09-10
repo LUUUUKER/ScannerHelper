@@ -43,6 +43,16 @@
                     <Button x:Name="InterceptionButton" Content="⚠ 打开拦截关卡 / Interception (4b)"
                             Width="230" Height="28" Click="OnInterceptionClicked" />
 
+                    <!--
+                        中文：4b 关卡失败之后的新方向（选项 A）。这个窗口不碰键盘，
+                              所以不和 4a、4b 互斥——它压根不装钩子。
+                        English: The direction taken after 4b failed (Option A). This window
+                                 touches no keyboard and therefore needs no mutual exclusion
+                                 with 4a or 4b: it installs no hook at all.
+                    -->
+                    <Button x:Name="SerialButton" Content="虚拟串口验证 / Virtual COM"
+                            Width="200" Height="28" Margin="8,0,0,0" Click="OnSerialClicked" />
+
                     <TextBlock x:Name="StatusText" VerticalAlignment="Center" Margin="16,0,0,0"
                                Text="未开始 / Not started" />
                 </StackPanel>

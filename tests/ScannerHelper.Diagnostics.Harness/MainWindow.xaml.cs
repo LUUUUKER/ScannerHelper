@@ -103,6 +103,14 @@ public partial class MainWindow : Window
     private InterceptionWindow? _interceptionWindow;
 
     /// <summary>
+    /// 中文：打开着的串口验证窗口，null 表示没开。同样只允许一个——两个窗口
+    ///       会抢同一个串口，而后开的那个只会得到「端口被占用」。
+    /// English: The open serial verification window, or null. Only one is allowed: two would
+    ///          contend for the same port and the second would only ever see "port in use".
+    /// </summary>
+    private SerialWindow? _serialWindow;
+
+    /// <summary>
     /// 中文：第一个事件的时间戳，用于把日志里的时间显示成相对毫秒。
     ///       绝对的 Stopwatch 读数对人毫无意义，相对时间才能看出"这几个字符
     ///       是连着来的"。
@@ -206,6 +214,33 @@ public partial class MainWindow : Window
             StartButton.IsEnabled = true;
         };
 
+        window.Show();
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   打开虚拟串口验证窗口（选项 A）。
+    ///
+    ///   ★ 它不与观测、拦截互斥，因为它**不装钩子、不注册 Raw Input**——
+    ///     串口方案的全部意义就在于此：扫码枪不再是键盘，也就没有什么需要拦。
+    /// English:
+    ///   Opens the virtual COM verification window (Option A).
+    ///
+    ///   It needs no mutual exclusion with observation or interception because it installs no
+    ///   hook and registers no Raw Input — which is the whole point of the serial approach: the
+    ///   scanner stops being a keyboard, so there is nothing left to intercept.
+    /// </summary>
+    private void OnSerialClicked(object sender, RoutedEventArgs e)
+    {
+        if (_serialWindow is not null)
+        {
+            _serialWindow.Activate();
+            return;
+        }
+
+        var window = new SerialWindow { Owner = this };
+        _serialWindow = window;
+        window.Closed += (_, _) => _serialWindow = null;
         window.Show();
     }
 
