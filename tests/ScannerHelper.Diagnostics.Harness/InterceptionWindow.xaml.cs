@@ -421,6 +421,10 @@ public partial class InterceptionWindow : Window
         counters.AppendLine(CultureInfo.InvariantCulture, $"放行 / Passed        {snapshot.PassedThroughCount}");
         counters.AppendLine(CultureInfo.InvariantCulture, $"补发 / Replayed      {snapshot.ReplayedCount}");
         counters.AppendLine(CultureInfo.InvariantCulture, $"Raw Input           {snapshot.RawInputCount}");
+        counters.AppendLine(CultureInfo.InvariantCulture,
+            $"  其中扫码枪 / bound  {snapshot.RawInputFromBoundCount}");
+        counters.AppendLine(CultureInfo.InvariantCulture,
+            $"  其中合成 / injected {snapshot.RawInputInjectedCount}");
         counters.AppendLine(CultureInfo.InvariantCulture, $"扫描 / Scans         {snapshot.ScanCount}");
         counters.AppendLine();
         counters.AppendLine(CultureInfo.InvariantCulture,

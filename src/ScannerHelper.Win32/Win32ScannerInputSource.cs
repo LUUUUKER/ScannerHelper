@@ -218,6 +218,8 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     private long _swallowedCount;
     private long _passedThroughCount;
     private long _rawInputCount;
+    private long _rawInputFromBoundCount;
+    private long _rawInputInjectedCount;
     private long _scanCount;
     private long _maximumHookCallbackTicks;
     private long _hookCallbackBudgetExceededCount;
@@ -393,6 +395,85 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
     ///          count means the channels are out of step and correlation cannot be trusted.
     /// </summary>
     public long RawInputCount => Interlocked.Read(ref _rawInputCount);
+
+    /// <summary>
+    /// 中文：
+    ///   来自**已绑定扫码枪**的 Raw Input 事件数。
+    ///
+    ///   ★ 这个数字是用来回答一个架构级问题的，它比总数有用得多。
+    ///
+    ///     产品的做法是：钩子先把按键吞掉，等 Raw Input 揭示来源再决定
+    ///     （规格 §5.3）。这套做法有一个从没被验证过的前提——**按键被吞掉
+    ///     之后，它的 WM_INPUT 仍然会产生**。
+    ///
+    ///     如果这个前提不成立，扣留就等于销毁了用来判断的证据，整条路走不通，
+    ///     那不是某处有 bug 而是架构问题。分开数就能一眼分辨：
+    ///       绑定期间扫了码，这个数却几乎不涨 → 前提不成立；
+    ///       它跟着涨                        → 前提成立，配对失败另有原因。
+    /// English:
+    ///   Raw Input events from the bound scanner.
+    ///
+    ///   Far more useful than the total, because it answers an architectural question. The
+    ///   product swallows a keystroke first and waits for Raw Input to reveal its source
+    ///   (spec §5.3), which rests on a premise never verified: that a swallowed keystroke still
+    ///   produces its WM_INPUT. If it does not, withholding destroys the evidence the decision
+    ///   needs and the approach cannot work at all — an architectural problem rather than a bug.
+    ///   Counting separately tells them apart at a glance: scanning while bound without this
+    ///   number moving means the premise is false; moving with it means the premise holds and
+    ///   pairing fails for some other reason.
+    /// </summary>
+    public long RawInputFromBoundCount => Interlocked.Read(ref _rawInputFromBoundCount);
+
+    /// <summary>
+    /// 中文：
+    ///   设备句柄为 0 的 Raw Input 事件数——也就是**没有真实硬件来源**的那些。
+    ///
+    ///   ★ 本程序自己用 SendInput 补发的按键，如果也会产生 WM_INPUT，就会落在
+    ///     这里。代码里原本假设「合成事件不经过 Raw Input」，那句话被标着
+    ///     「值得在 4a 确认」——从没真的确认过。这个计数就是去确认它。
+    ///
+    ///     它要是跟着补发数一起涨，那条假设就是错的，而 Raw Input 的总数里
+    ///     混着我们自己制造的回声——拿总数去判断任何事都会被带偏。
+    /// English:
+    ///   Raw Input events whose device handle is zero — those with no real hardware source.
+    ///
+    ///   Keystrokes this application replays through SendInput land here if synthesized input
+    ///   produces WM_INPUT at all. The code assumed it does not, in a comment marked "worth
+    ///   confirming in 4a" that was never actually confirmed; this counter confirms it. Should it
+    ///   track the replay count, that assumption is wrong and the Raw Input total contains an echo
+    ///   of our own making — which would mislead any judgment based on the total.
+    /// </summary>
+    public long RawInputInjectedCount => Interlocked.Read(ref _rawInputInjectedCount);
+
+    /// <summary>
+    /// 中文：
+    ///   把全部运行时计数清零。
+    ///
+    ///   ★ 每次启用拦截时都要清一遍。不清的话，一次测量的数字里混着上一次的
+    ///     ——而这正是刚刚发生过的事：「停止再启用」看起来像重新开始，计数
+    ///     却在累加，于是一组作废的数据看上去和一组有效的数据长得一模一样。
+    ///     测量工具给出无法分辨真假的数字，比不给还糟。
+    /// English:
+    ///   Zeroes every runtime counter.
+    ///
+    ///   Done on each start. Otherwise one measurement's numbers carry the previous one's — which
+    ///   is exactly what just happened: stop-then-start looks like a fresh beginning while the
+    ///   counters keep accumulating, so an invalid run looks identical to a valid one. A
+    ///   measurement tool that produces numbers you cannot tell apart is worse than none.
+    /// </summary>
+    public void ResetCounters()
+    {
+        Interlocked.Exchange(ref _swallowedCount, 0);
+        Interlocked.Exchange(ref _passedThroughCount, 0);
+        Interlocked.Exchange(ref _rawInputCount, 0);
+        Interlocked.Exchange(ref _rawInputFromBoundCount, 0);
+        Interlocked.Exchange(ref _rawInputInjectedCount, 0);
+        Interlocked.Exchange(ref _scanCount, 0);
+        Interlocked.Exchange(ref _maximumHookCallbackTicks, 0);
+        Interlocked.Exchange(ref _hookCallbackBudgetExceededCount, 0);
+        Interlocked.Exchange(ref _faultCount, 0);
+        Volatile.Write(ref _lastFault, null);
+    }
 
     /// <summary>
     /// 中文：处理完毕的扫描次数（含失败）。
@@ -885,6 +966,17 @@ public sealed class Win32ScannerInputSource : ICaptureThreadWork, IDisposable
         }
 
         Interlocked.Increment(ref _rawInputCount);
+
+        // 按来源分开数，理由见 RawInputFromBoundCount 与 RawInputInjectedCount。
+        // Counted by source; see RawInputFromBoundCount and RawInputInjectedCount for why.
+        if (observedEvent.DeviceHandle == 0)
+        {
+            Interlocked.Increment(ref _rawInputInjectedCount);
+        }
+        else if (observedEvent.DeviceHandle == (nint)Interlocked.Read(ref _boundDeviceHandle))
+        {
+            Interlocked.Increment(ref _rawInputFromBoundCount);
+        }
 
         try
         {

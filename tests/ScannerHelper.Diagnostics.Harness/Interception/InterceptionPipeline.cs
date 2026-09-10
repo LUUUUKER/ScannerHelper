@@ -108,6 +108,8 @@ public readonly record struct PipelineSnapshot(
     long PassedThroughCount,
     long ReplayedCount,
     long RawInputCount,
+    long RawInputFromBoundCount,
+    long RawInputInjectedCount,
     long ScanCount,
     long UnresolvedEventCount,
     long DiscardedRawInputCount,
@@ -247,10 +249,24 @@ public sealed class InterceptionPipeline : IDisposable
         => _source.EnumerateKeyboards();
 
     /// <summary>
-    /// 中文：启动拦截。此时还没有绑定扫码枪，因此什么都不会被吞掉。
-    /// English: Starts interception. No scanner is bound yet, so nothing is swallowed.
+    /// 中文：
+    ///   启动拦截，并把全部计数清零。
+    ///
+    ///   ★ 清零是启动的一部分，不是一个可选的额外按钮。一次测量的数字里混进
+    ///     上一次的，两组数据就再也分不开——而分开正是这个工具存在的理由。
+    /// English:
+    ///   Starts interception and zeroes every counter.
+    ///
+    ///   Clearing is part of starting rather than an optional extra button: numbers carried over
+    ///   from a previous run make two measurements inseparable, and separating them is what this
+    ///   tool is for.
     /// </summary>
-    public void Start() => _source.Start();
+    public void Start()
+    {
+        _source.ResetCounters();
+        _correlator.Reset();
+        _source.Start();
+    }
 
     /// <summary>
     /// 中文：停止拦截。
@@ -327,6 +343,8 @@ public sealed class InterceptionPipeline : IDisposable
             PassedThroughCount: _source.PassedThroughCount,
             ReplayedCount: _source.ReplayedCount,
             RawInputCount: _source.RawInputCount,
+            RawInputFromBoundCount: _source.RawInputFromBoundCount,
+            RawInputInjectedCount: _source.RawInputInjectedCount,
             ScanCount: _source.ScanCount,
             UnresolvedEventCount: _correlator.UnresolvedEventCount,
             DiscardedRawInputCount: _correlator.DiscardedRawInputCount,

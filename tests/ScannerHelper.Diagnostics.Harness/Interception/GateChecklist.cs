@@ -479,6 +479,10 @@ public sealed class GateChecklist
         report.AppendLine(CultureInfo.InvariantCulture, $"- 放行 / Passed through: {snapshot.PassedThroughCount}");
         report.AppendLine(CultureInfo.InvariantCulture, $"- 补发 / Replayed: {snapshot.ReplayedCount}");
         report.AppendLine(CultureInfo.InvariantCulture, $"- Raw Input 事件 / events: {snapshot.RawInputCount}");
+        report.AppendLine(CultureInfo.InvariantCulture,
+            $"  - 其中来自绑定扫码枪 / from the bound scanner: {snapshot.RawInputFromBoundCount}");
+        report.AppendLine(CultureInfo.InvariantCulture,
+            $"  - 其中设备句柄为 0（合成）/ device handle zero (synthesized): {snapshot.RawInputInjectedCount}");
         report.AppendLine(CultureInfo.InvariantCulture, $"- 处理完成的扫描 / Scans processed: {snapshot.ScanCount}");
         report.AppendLine(CultureInfo.InvariantCulture,
             $"- **超时未关联 / Unresolved (expired, replayed raw): {snapshot.UnresolvedEventCount}**");
