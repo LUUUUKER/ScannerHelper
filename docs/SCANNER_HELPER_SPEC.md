@@ -1363,6 +1363,37 @@ Output is emitted as Unicode (section 2.2), which protects the *output* path. Th
 
 V1 assumes scans consist of printable characters terminated by Enter. Barcodes containing embedded Tab or GS (`0x1D`) separators — common in GS1 — are **not supported by the V1 model**. If such codes appear in the pilot, the scan model needs revisiting; do not paper over it with parsing rules.
 
+### 22.5 Scanner emission rate and character loss — measured, not hypothetical
+
+**Observed during Task 4a on the development machine.** Scanning one barcode roughly fifty times into Notepad, with Scanner Helper **not running at all**, produced a minority of damaged results:
+
+```text
+Expected:  DGKJRDC5679F5NF
+Observed:  DGKJRDF                    truncated
+           DGKjDC5679F5NF             uppercase arrived lowercase, one character dropped
+           DGKJRDC5679F5NDGKF5NF      two transmissions overlapping
+           DGKJRDC5679                truncated
+```
+
+**This is not an optical misread, and the symptom pattern is what rules it out.** A barcode carries no letter case; case is decided by the Shift key during transmission, so a lowercase character can only mean the receiving application saw the wrong Shift state — a keyboard-emulation timing artifact downstream of decoding. Two overlapping transmissions are likewise impossible optically. And an optical misread normally fails its check digit and produces *nothing* (the scanner does not even beep) rather than a correct prefix.
+
+The measured inter-character interval for this scanner is a **median of about 1.1 ms**, which is fast enough that the Windows keyboard path may not keep up.
+
+**Consequences that must be settled before the pilot:**
+
+| Where the loss occurs | Consequence |
+|---|---|
+| **After** the low-level hook (Windows → application) | Scanner Helper's architecture repairs it: the raw keystrokes are swallowed and the decoded string is re-emitted through `SendInput` at a controlled pace. This is a genuine benefit of the design, not a side effect. |
+| **Before** the hook (scanner → Windows) | Scanner Helper faithfully captures a damaged code and emits it while the UI reports success. This is section 19.1's silently wrong data, and **SN mode has no defense at all** — section 3 requires the raw code to pass through unchanged, so no validation layer exists to catch it. |
+
+Distinguishing the two requires reconstructing what the hook observed and comparing it against what the application received; the Task 4a harness does this. **Do not proceed to a pilot without that answer.**
+
+**Mitigations, in the order they should be tried:**
+
+1. **Increase the scanner's inter-character delay.** Most HID keyboard scanners expose this through a configuration barcode; raising it from zero to roughly 5–10 ms is the standard remedy for a scanner outrunning the host. This is a hardware configuration change and needs no software at all — try it first.
+2. **Verify against the real business application, not a text editor.** Assumption A1 puts the business application in a browser, and browsers generally process keystrokes more slowly than Notepad. A loss rate measured in Notepad is therefore a *lower* bound on what the browser will see.
+3. **If loss occurs before the hook and cannot be configured away**, SN mode's lack of any validation layer becomes a product-level problem rather than an implementation detail, and section 3 needs revisiting — for instance an optional length or format check on SN output. Raise it as a specification change; do not add an undocumented check in code.
+
 ---
 
 ## 23. Deferred Features
