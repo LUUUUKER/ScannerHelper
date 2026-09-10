@@ -315,11 +315,24 @@ public sealed class RawInputKeyboardListener : IDisposable
             IsExtended: (rawInput.keyboard.Flags & RawInputNative.RI_KEY_E0) != 0,
             IsKeyUp: (rawInput.keyboard.Flags & RawInputNative.RI_KEY_BREAK) != 0,
 
-            // 合成事件（SendInput）不经过 Raw Input，因此这条通道上恒为 false。
-            // 这本身是 4a 值得确认的一条事实，也是 4b 防递归的依据之一（规格 §5.6）。
-            // Synthesized events do not travel through Raw Input, so this is always
-            // false here — itself a fact worth confirming in 4a, and part of what 4b's
-            // recursion guard rests on (spec §5.6).
+            // ★ 这里恒为 false，但**不是**因为合成事件不经过 Raw Input——那句话曾经
+            //   写在这里、标着「值得在 4a 确认」，而 2026-09-10 的实测证明它是错的：
+            //   我们自己 SendInput 补发的 486 个按键，产生了 485 条 Raw Input。
+            //
+            //   恒为 false 的真正原因是这条通道**没有**任何标志位能表达"合成"。
+            //   要分辨合成事件只能看设备句柄：真实硬件有句柄，合成的是 0。
+            //   任何既注入按键又监听 Raw Input 的代码都必须显式滤掉句柄为 0 的事件，
+            //   否则自己的输出会被当成外部输入重新吃进来（见 TASK_4B_FINDING_20260910.md）。
+            //
+            // Always false here, but not because synthesized events bypass Raw Input — that
+            // sentence used to sit here marked "worth confirming in 4a", and the 2026-09-10
+            // measurement proved it wrong: 486 replayed keystrokes produced 485 Raw Input events.
+            //
+            // It is false because this channel carries no flag capable of expressing "synthesized"
+            // at all. The only way to tell is the device handle: real hardware has one, synthesized
+            // input has zero. Any code that both injects keystrokes and listens to Raw Input must
+            // filter zero-handle events explicitly, or it eats its own output as external input
+            // (see TASK_4B_FINDING_20260910.md).
             IsInjected: false,
 
             DeviceHandle: rawInput.header.hDevice));
