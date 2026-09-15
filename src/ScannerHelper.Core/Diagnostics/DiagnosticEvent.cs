@@ -90,9 +90,6 @@ public enum DiagnosticEventKind
     /// <summary>中文：校验失败，等工人决定。 English: Validation failed; awaiting the operator.</summary>
     ValidationFailed,
 
-    /// <summary>中文：工人按了强制发送。 English: The operator pressed Force Send.</summary>
-    ForceSent,
-
     /// <summary>中文：工人丢弃了这一枪。 English: The operator discarded the scan.</summary>
     Discarded,
 

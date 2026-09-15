@@ -68,20 +68,28 @@ namespace ScannerHelper.Win32;
 /// </summary>
 public enum ScannerHotkey
 {
-    /// <summary>中文：F8，切换 SN / SKU。 English: F8, toggles SN/SKU.</summary>
+    /// <summary>
+    /// 中文：
+    ///   切换 SN / SKU。默认 Insert，设置里可改（见 HotkeySettings.ToggleMode）。
+    ///
+    ///   ★ 本程序现在**只注册这一个**全局热键。
+    ///
+    ///     F10（强制发送）与 Esc（丢弃）在 2026-09-15 随那两个功能一起去掉了，
+    ///     见 docs/CHANGE_ERROR_HANDLING.md。这里也把枚举值删掉，而不是留着
+    ///     不用——留着的话，谁调一次 Register(ForceSend) 就会把 F10 从整个系统
+    ///     里拿走，而这个程序界面上再也没有任何地方提到 F10，排查的人根本不会
+    ///     往这儿想。没有用户的能力就不该留在代码里。
+    /// English:
+    ///   Toggles SN/SKU. Insert by default, changeable in Settings (see HotkeySettings.ToggleMode).
+    ///
+    ///   This is now the only global hotkey the program registers. F10 (Force Send) and Escape
+    ///   (Discard) went with those features on 2026-09-15; see docs/CHANGE_ERROR_HANDLING.md. Their
+    ///   enum values are deleted rather than left unused: left in place, one call to
+    ///   Register(ForceSend) would take F10 away from the whole system while nothing in this
+    ///   program's UI mentions F10 any more, and nobody investigating would think to look here. A
+    ///   capability with no user does not belong in the code.
+    /// </summary>
     ToggleMode = 1,
-
-    /// <summary>
-    /// 中文：F10，强制发送。**只在有待决错误时注册**（规格 §7）。
-    /// English: F10, Force Send. Registered only while an error is pending (spec §7).
-    /// </summary>
-    ForceSend = 2,
-
-    /// <summary>
-    /// 中文：Esc，丢弃这一枪。**只在有待决错误时注册**（规格 §7）。
-    /// English: Escape, discard the scan. Registered only while an error is pending (spec §7).
-    /// </summary>
-    Discard = 3,
 }
 
 /// <summary>
@@ -100,15 +108,6 @@ public sealed class HotkeyPressedEventArgs(ScannerHotkey hotkey) : EventArgs
 /// </summary>
 public sealed class GlobalHotkeyListener : IDisposable
 {
-    /// <summary>中文：F8 的虚拟键码。 English: F8's virtual key code.</summary>
-    public const ushort VirtualKeyF8 = 0x77;
-
-    /// <summary>中文：F10。 English: F10.</summary>
-    public const ushort VirtualKeyF10 = 0x79;
-
-    /// <summary>中文：Esc。 English: Escape.</summary>
-    public const ushort VirtualKeyEscape = 0x1B;
-
     private readonly string _windowClassName = $"ScannerHelperHotkeys_{Guid.NewGuid():N}";
     private readonly HashSet<ScannerHotkey> _registered = [];
 
@@ -299,27 +298,15 @@ public sealed class GlobalHotkeyListener : IDisposable
         // waiting on a decision (see MainWindow's SyncHotkeys) and hold nothing the rest of the
         // time, so their window for clashing is very narrow. The toggle is different: it is held
         // permanently, and the permanent one is what clashed on site.
-        uint modifiers;
-        ushort virtualKey;
-
-        if (hotkey == ScannerHotkey.ToggleMode)
+        if (!TryResolve(ToggleModeChord, out var modifiers, out var virtualKey))
         {
-            if (!TryResolve(ToggleModeChord, out modifiers, out virtualKey))
-            {
-                // 配置里的键名认不出来。不回退到别的键——见 HotkeyKeyCatalog.TryParse：
-                // 悄悄换一个键会让界面显示的和实际生效的不一致。返回 false，
-                // 界面那句"按 X 切换模式"就会换成"这台机器上不可用"。
-                // The configured name is unrecognized. No fallback to another key — see
-                // HotkeyKeyCatalog.TryParse: substituting silently makes the UI disagree with
-                // reality. Returning false turns the "press X to switch" hint into "unavailable
-                // on this machine".
-                return false;
-            }
-        }
-        else
-        {
-            modifiers = HotkeyNative.MOD_NONE;
-            virtualKey = hotkey == ScannerHotkey.ForceSend ? VirtualKeyF10 : VirtualKeyEscape;
+            // 配置里的键名认不出来。不回退到别的键——见 HotkeyKeyCatalog.TryParse：
+            // 悄悄换一个键会让界面显示的和实际生效的不一致。返回 false，
+            // 界面那句"按 X 切换模式"就会换成"这台机器上不可用"。
+            // The configured name is unrecognized. No fallback to another key — see
+            // HotkeyKeyCatalog.TryParse: substituting silently makes the UI disagree with reality.
+            // Returning false turns the "press X to switch" hint into "unavailable on this machine".
+            return false;
         }
 
         var registered = HotkeyNative.RegisterHotKey(

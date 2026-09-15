@@ -185,26 +185,86 @@
                     <TextBlock x:Name="ModeOnResumeText" Style="{StaticResource StateSubtitle}"
                                Margin="16,16,16,0" Visibility="Collapsed" />
 
+                    <!--
+                        中文：
+                          出错**是在哪个模式下**出的，这一条必须一眼看见。
+
+                          ★ 因为最常见的病因就是模式不对——SKU 模式扫了一个只有 SN
+                            的件。工人看到"在 SKU 模式下失败"，不用想就知道该按哪个
+                            按钮；只看到一片红，他还得自己回想刚才是什么模式。
+
+                          ★ 用一小块实色徽章（SN 绿 / SKU 蓝），而不是在红底上写
+                            彩色字。红底上的蓝字或绿字对比度很差，仓库的屏幕未必干净、
+                            光线未必好，而这块颜色恰恰是要在扫一眼的距离上起作用的。
+                            实色底 + 白字在红色背景上是清清楚楚的一块。
+
+                          ★ 它只占很小一块。主色仍然是红——现在最要紧的事是"这一枪
+                            没发出去"，模式是次要信息，面积上必须分得出主次。
+                        English:
+                          Which mode the failure happened in has to be visible at a glance.
+
+                          The commonest cause is the wrong mode — SKU mode on an item that only
+                          carries an SN. "Failed in SKU mode" tells the operator which button to press
+                          without thinking; a wall of red leaves them recalling which mode they were
+                          in.
+
+                          A small solid badge (SN green / SKU blue) rather than coloured text on red:
+                          blue or green text on red has poor contrast, warehouse screens are not
+                          always clean or well lit, and this colour has to work at a glance. A solid
+                          fill with white text is unmistakable against red.
+
+                          It stays small. Red remains the dominant colour, because what matters most
+                          is that the scan did not go out; the mode is secondary, and the areas must
+                          say so.
+                    -->
+                    <Border x:Name="ErrorModeBadge" Visibility="Collapsed"
+                            HorizontalAlignment="Center" CornerRadius="4"
+                            Padding="12,4" Margin="0,14,0,0">
+                        <TextBlock x:Name="ErrorModeBadgeText"
+                                   Foreground="{StaticResource OnStateBrush}"
+                                   FontSize="13" FontWeight="Bold" />
+                    </Border>
+
                     <TextBlock x:Name="ErrorCodeText" Style="{StaticResource StateSubtitle}"
-                               Margin="16,14,16,0" FontSize="16"
+                               Margin="16,10,16,0" FontSize="16"
                                FontFamily="Consolas, Courier New, monospace"
                                Visibility="Collapsed" />
 
                     <!--
-                        中文：出错时的两个出口。它们**也必须鼠标可达**——F10 与 Esc
-                              是快捷方式，不是唯一入口（规格 §11.1 的按钮化原则）。
-                        English: The two exits from an error. These must also be mouse-reachable:
-                                 F10 and Escape are shortcuts, not the only way in.
+                        中文：
+                          ★ 出错时给两个**明确写着目的地**的按钮，而不是一个"切换模式"。
+
+                            出错那一刻不该让工人先去判断"现在是哪个模式"——一个切换
+                            按钮要求他先知道当前状态才敢按，而他此刻正因为出错而分神，
+                            按反了就再错一次。两个按钮说的是去哪儿，按哪个都不会按反。
+
+                          ★ 这里曾经是「强制发送」和「丢弃」（规格 §10），2026-09-15
+                            一起去掉了。强制发送的能力移到了暂停，理由见
+                            docs/CHANGE_ERROR_HANDLING.md。
+                        English:
+                          Two buttons naming their destination rather than one "switch mode".
+
+                          The moment an error appears is the wrong moment to ask the operator which
+                          mode they are in: a toggle must be understood before it can be pressed, and
+                          their attention is on the error — pressing it backwards produces a second
+                          failure. Two buttons name where they go and cannot be pressed backwards.
+
+                          Force Send and Discard used to be here (spec §10) and were removed on
+                          2026-09-15; force-sending moved to PAUSED. See
+                          docs/CHANGE_ERROR_HANDLING.md.
                     -->
                     <StackPanel x:Name="ErrorActions" Orientation="Horizontal"
                                 HorizontalAlignment="Center" Margin="0,18,0,0"
                                 Visibility="Collapsed">
-                        <Button x:Name="ForceSendButton" Style="{StaticResource ActionButton}"
-                                Click="OnForceSendClicked"
-                                Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[ForceSend]}" />
-                        <Button x:Name="DiscardButton" Style="{StaticResource ActionButton}"
-                                Margin="10,0,0,0" Click="OnDiscardClicked"
-                                Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[DiscardScan]}" />
+                        <Button x:Name="ChooseSnButton" Style="{StaticResource ActionButton}"
+                                Click="OnChooseSnClicked" Background="{StaticResource SnBrush}"
+                                Foreground="{StaticResource OnStateBrush}" BorderThickness="0"
+                                Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SwitchToSn]}" />
+                        <Button x:Name="ChooseSkuButton" Style="{StaticResource ActionButton}"
+                                Margin="10,0,0,0" Click="OnChooseSkuClicked"
+                                Background="{StaticResource SkuBrush}"
+                                Foreground="{StaticResource OnStateBrush}" BorderThickness="0"
+                                Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SwitchToSku]}" />
                     </StackPanel>
 
                     <TextBlock x:Name="SwitchHintText" Style="{StaticResource StateSubtitle}"

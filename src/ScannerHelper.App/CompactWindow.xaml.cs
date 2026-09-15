@@ -35,7 +35,8 @@
 //
 // 包含的成员 / Members in this file:
 //   Refresh            由 Full 推进来的状态
-//   ExpandRequested    请求展开回 Full
+//   ExpandRequested    请求展开回 Full（「展开」按钮）
+//   CloseRequested     请求退出程序（右上角 ×）
 // =============================================================================
 
 using System.Windows;
@@ -68,6 +69,32 @@ public partial class CompactWindow : Window
 
     /// <summary>
     /// 中文：
+    ///   工人点了小窗右上角的 ×，意思是**退出程序**。
+    ///
+    ///   ★ 这里曾经把 × 当成"展开"。那是错的：× 在任何窗口上都意味着关闭，
+    ///     而小窗旁边本来就有一个「展开」按钮——两个控件做同一件事，其中一个
+    ///     还骗了用户一次。工人点 × 是想关掉程序，就该按他想的来。
+    ///
+    ///   ★ 接这个事件的一方要先展开成 Full 再走关闭流程，而不是直接在小窗上
+    ///     弹确认框。确认框需要一个可见的属主窗口：挂在一个即将消失的小窗上，
+    ///     框可能跑到别的窗口后面去，而工人看到的是"点了没反应"。
+    /// English:
+    ///   The operator clicked the compact window's close button, meaning they want to exit.
+    ///
+    ///   This used to be treated as "expand". That was wrong: an X means close on every window, and
+    ///   the compact window already has an Expand button beside it — two controls doing one thing,
+    ///   one of them lying. Someone clicking X wants the program closed, and that is what should
+    ///   happen.
+    ///
+    ///   The handler expands to Full first and then runs the close, rather than raising the
+    ///   confirmation on the compact window: a modal dialog needs a visible owner, and one owned by a
+    ///   window that is about to disappear can end up behind something else, which the operator reads
+    ///   as "clicking did nothing".
+    /// </summary>
+    public event EventHandler? CloseRequested;
+
+    /// <summary>
+    /// 中文：
     ///   因为程序要退出而关闭。
     ///
     ///   ★ 必须和"工人点了小窗口的关闭按钮"分开。后者的含义是"我不想看到这个
@@ -88,6 +115,13 @@ public partial class CompactWindow : Window
         _isClosingForExit = true;
         Close();
     }
+
+    /// <summary>
+    /// 中文：模式的显示名。SN / SKU 两种语言下都不翻译（规格 §12「术语」）。
+    /// English: The mode's label. SN and SKU stay untranslated in both languages (spec §12).
+    /// </summary>
+    private static string ModeLabel(ScanMode mode, LocalizedStrings strings)
+        => strings[mode == ScanMode.Sn ? "ModeSn" : "ModeSku"];
 
     private static App CurrentApp => (App)Application.Current;
 
@@ -138,7 +172,23 @@ public partial class CompactWindow : Window
             StatePanel.Background = (Brush)FindResource("ErrorBrush");
             HazardStripe.Visibility = Visibility.Visible;
             StateTitleText.Text = "⚠";
-            StateSubtitleText.Text = pendingCode;
+
+            // ★ 小窗里也要说清是在哪个模式下出的错。
+            //
+            //   出错会自动展开成大窗（规格 §11.7），所以这一屏往往只闪一下——
+            //   但"只闪一下"不是可以少说一句的理由：那一下正是工人抬眼看到的
+            //   第一眼，而模式不对恰恰是最常见的病因。
+            //
+            //   这里用文字而不是色块：小窗只有一行的地方，再塞一块颜色会把
+            //   本来就短的那行码挤掉，而码是他要认的东西。
+            // The compact window says which mode too. An error auto-expands to Full (spec §11.7), so
+            // this screen often only flashes — but a flash is no reason to say less: it is the first
+            // thing the operator's eye lands on, and the wrong mode is the commonest cause.
+            //
+            // Text rather than a colour block: there is room for one line here, and another block
+            // would squeeze out the code itself, which is what they need to read.
+            StateSubtitleText.Text = Localizer.Format(
+                "ErrorInMode", ModeLabel(snapshot.Mode, strings)) + "  " + pendingCode;
             SwitchModeButton.Visibility = Visibility.Collapsed;
         }
         else if (snapshot.IsPaused)
@@ -265,8 +315,8 @@ public partial class CompactWindow : Window
             return;
         }
 
-        // 工人点了小窗的 ×。这不是退出，是展开回大窗（规格 §11.3：绝不最小化到
-        // 看不见的状态），所以先把这次关闭挡下来。
+        // 工人点了小窗的 ×，意思是退出程序（见 CloseRequested）。先把这次关闭
+        // 挡下来——真正的退出要在展开成 Full 之后走，那里有确认框（规格 §11.6）。
         e.Cancel = true;
         _isClosingForExpand = true;
 
@@ -300,7 +350,7 @@ public partial class CompactWindow : Window
         //
         // BeginInvoke defers the expansion until after this close is handled, by which point the
         // window is no longer closing and ExpandFromCompact may legitimately close it.
-        Dispatcher.BeginInvoke(() => ExpandRequested?.Invoke(this, EventArgs.Empty));
+        Dispatcher.BeginInvoke(() => CloseRequested?.Invoke(this, EventArgs.Empty));
     }
 
     private void SaveBounds()

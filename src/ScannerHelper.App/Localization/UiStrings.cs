@@ -132,9 +132,15 @@ public static class UiStrings
         ["ErrorHeading"] = "⚠  SCAN NOT SENT",
         ["ErrorParse"] = "The SKU rule did not match this code",
         ["ErrorValidation"] = "The extracted SKU failed validation",
-        ["ErrorPrompt"] = "Send it as scanned, or discard it?",
-        ["ForceSend"] = "Send as scanned  (F10)",
-        ["DiscardScan"] = "Discard  (Esc)",
+        // ★ 这句曾经是"按原样发出去，还是丢弃？"——描述的是 F10 / Esc 那两个出口。
+        //   它们在 2026-09-15 去掉了（见 docs/CHANGE_ERROR_HANDLING.md），而一句
+        //   还在描述已删除功能的提示比没有提示更坏：工人会去找那两个按钮，找不到
+        //   就以为程序坏了。
+        // This used to read "send it as scanned, or discard it?", describing the F10 / Escape exits.
+        // Those were removed on 2026-09-15 (see docs/CHANGE_ERROR_HANDLING.md), and a prompt still
+        // describing a deleted feature is worse than none: the operator looks for those buttons and
+        // concludes the program is broken when they are not there.
+        ["ErrorPrompt"] = "Pick the right mode below, then scan again",
 
         ["Settings"] = "Settings",
         ["Pin"] = "Keep on top",
@@ -216,6 +222,13 @@ public static class UiStrings
             + "Scans are no longer being processed. Start it again to carry on.\n\n"
             + "The details were written to the log folder (Settings -> Open the log folder).",
 
+        // 出错界面。{0} 是出错时所处的模式——最常见的病因就是模式不对。
+        // The error screen. {0} is the mode the failure happened in; the wrong mode is the
+        // commonest cause.
+        ["ErrorInMode"] = "Failed in {0}",
+        ["SwitchToSn"] = "Switch to SN",
+        ["SwitchToSku"] = "Switch to SKU",
+
         ["SettingsHotkeyGroup"] = "Mode switch key",
         ["SettingsToggleKey"] = "Key",
 
@@ -292,9 +305,7 @@ public static class UiStrings
         ["ErrorHeading"] = "⚠  这一枪没有发出",
         ["ErrorParse"] = "SKU 规则匹配不上这个码",
         ["ErrorValidation"] = "提取出来的 SKU 没通过校验",
-        ["ErrorPrompt"] = "按原样发出去，还是丢弃？",
-        ["ForceSend"] = "原样发出  (F10)",
-        ["DiscardScan"] = "丢弃  (Esc)",
+        ["ErrorPrompt"] = "在下面选对模式，然后重扫一次",
 
         ["Settings"] = "设置",
         ["Pin"] = "始终置顶",
@@ -357,6 +368,10 @@ public static class UiStrings
             "扫码助手遇到一个意料之外的错误，必须关闭。\n\n"
             + "扫码已经停止处理了，重新打开程序即可继续。\n\n"
             + "详细情况已经写进日志文件夹（设置 → 打开日志文件夹）。",
+
+        ["ErrorInMode"] = "在 {0} 下没发出去",
+        ["SwitchToSn"] = "切到 SN",
+        ["SwitchToSku"] = "切到 SKU",
 
         ["SettingsHotkeyGroup"] = "模式切换按键",
         ["SettingsToggleKey"] = "按键",

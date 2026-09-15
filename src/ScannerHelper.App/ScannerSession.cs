@@ -52,7 +52,7 @@
 // 包含的成员 / Members in this file:
 //   Connect / Disconnect        串口连接
 //   ToggleMode / Pause / Resume 模式与安全阀
-//   ForceSend / Discard         待决错误的两个出口
+//   SetMode                     错误界面上那两个模式按钮
 //   ApplySettings               设置变更
 //   Snapshot                    给界面看的一份即时快照
 // =============================================================================
@@ -403,6 +403,7 @@ public sealed class ScannerSession : IDisposable
         {
             _modeManager.Toggle();
             mode = _modeManager.CurrentMode;
+            ClearErrorNotice();
         }
 
         _log.Write(new DiagnosticEvent(
@@ -450,31 +451,51 @@ public sealed class ScannerSession : IDisposable
     }
 
     /// <summary>
-    /// 中文：强制发送待决错误里的原始码（规格 §10）。
-    /// English: Force-sends the pending error's raw code (spec §10).
+    /// 中文：
+    ///   直接切到指定模式。错误界面上那两个按钮走的是这里。
+    ///
+    ///   ★ 为什么错误界面给的是「切到 SN」「切到 SKU」两个按钮，而不是一个
+    ///     「切换模式」。出错那一刻不该让工人先去判断"现在是哪个模式"——
+    ///     一个切换按钮要求他先知道当前状态才敢按，而他此刻正因为出错而分神。
+    ///     两个明确的按钮说的是目的地，按哪个都不会按反。
+    ///
+    ///   ★ 切换清掉错误提示，但不重发那一枪。见 ScanProcessor 里的说明。
+    /// English:
+    ///   Switches straight to a mode; the error screen's two buttons come here.
+    ///
+    ///   The error screen offers "switch to SN" and "switch to SKU" rather than one "switch mode"
+    ///   button because the moment an error appears is the wrong moment to ask the operator to work
+    ///   out which mode they are in — a toggle requires knowing the current state before daring to
+    ///   press it, and their attention is on the error. Two explicit buttons name the destination,
+    ///   and neither can be pressed backwards.
+    ///
+    ///   Switching clears the notice but does not re-emit the scan; see the note in ScanProcessor.
     /// </summary>
-    public void ForceSend()
+    public void SetMode(ScanMode mode)
     {
         lock (_gate)
         {
-            _processor.ForceSend();
+            _modeManager.SetMode(mode);
+            ClearErrorNotice();
         }
 
+        _log.Write(new DiagnosticEvent(
+            DateTimeOffset.Now, DiagnosticEventKind.ModeChanged, Mode: Describe(mode)));
+
+        ModeToggled?.Invoke(this, mode);
         Changed?.Invoke(this, EventArgs.Empty);
     }
 
     /// <summary>
-    /// 中文：丢弃待决错误，什么都不发。
-    /// English: Discards the pending error, emitting nothing.
+    /// 中文：
+    ///   消掉错误提示。**调用方必须已经持有 _gate。**
+    /// English:
+    ///   Clears the error notice. Callers must already hold _gate.
     /// </summary>
-    public void Discard()
+    private void ClearErrorNotice()
     {
-        lock (_gate)
-        {
-            _processor.Cancel();
-        }
-
-        Changed?.Invoke(this, EventArgs.Empty);
+        _processor.ClearPendingError();
+        _pendingFailureKey = null;
     }
 
     /// <summary>
@@ -670,18 +691,6 @@ public sealed class ScannerSession : IDisposable
                     raised = true;
                     break;
 
-                case ScanOutcome.ForceSent forceSent:
-                    _lastScanRawCode = forceSent.RawCode;
-                    _lastScanEmitted = forceSent.RawCode;
-                    _pendingFailureKey = null;
-                    break;
-
-                case ScanOutcome.Cancelled cancelled:
-                    _lastScanRawCode = cancelled.RawCode;
-                    _lastScanEmitted = null;
-                    _pendingFailureKey = null;
-                    break;
-
                 case ScanOutcome.ModeCommand command:
                     _lastScanRawCode = command.RawCode;
                     _lastScanEmitted = null;
@@ -759,12 +768,6 @@ public sealed class ScannerSession : IDisposable
                 now, DiagnosticEventKind.ValidationFailed, mode, validationFailed.RawCode,
                 validationFailed.Sku,
                 string.Join("; ", validationFailed.Failure.Failures)),
-
-            ScanOutcome.ForceSent forceSent => new DiagnosticEvent(
-                now, DiagnosticEventKind.ForceSent, mode, forceSent.RawCode),
-
-            ScanOutcome.Cancelled cancelled => new DiagnosticEvent(
-                now, DiagnosticEventKind.Discarded, mode, cancelled.RawCode),
 
             // 命令条码切换的模式记成 ModeChanged，和按键切换同一种事件——
             // 读日志的人关心的是"什么时候切的"，不是"用什么切的"；后者放在备注里。

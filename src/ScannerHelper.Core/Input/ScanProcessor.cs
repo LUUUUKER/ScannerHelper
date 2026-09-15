@@ -57,7 +57,7 @@
 //   State / IsPaused / PendingError  当前状态
 //   OnScanReceived                   一次扫描进来
 //   Pause / Resume                   安全阀（决策 D-26）
-//   ForceSend / Cancel               待决错误的两个出口
+//   ClearPendingError                消掉错误提示（换模式或重扫成功时）
 //   UpdateSkuRules                   设置变更
 // =============================================================================
 
@@ -258,7 +258,26 @@ public sealed class ScanProcessor
                 return;
             }
 
+            // ★ 换模式清掉错误提示，但**绝不**拿那一枪用新模式重发一遍。
+            //
+            //   重发看着省事——"哦模式错了"，切一下货就过去了——但发出去的数据
+            //   来自换模式**之前**那一枪，而工人此刻多半没在看屏幕，手里的货也
+            //   未必还是刚才那件。而且扫模式码这个动作会变成"有错时顺便发一枪、
+            //   没错时只换模式"，同一个动作两种结果，正是最容易让人措手不及的那类。
+            //
+            //   规则保持一条：发出去的东西永远对应工人**当下**这一次扫码。
+            //
+            // Switching mode clears the notice but never re-emits the failed scan under the new mode.
+            //
+            // Re-emitting looks convenient — "wrong mode", switch, and the item goes through — but
+            // the data would come from the scan taken before the switch, while the operator is
+            // probably not watching the screen and may no longer be holding that item. It would also
+            // make scanning a mode sheet do one thing when an error is showing and another when it
+            // is not, which is exactly the kind of difference that catches people out.
+            //
+            // One rule holds instead: what goes out always corresponds to the scan just taken.
             var target = command == ScanCommandKind.SwitchToSn ? ScanMode.Sn : ScanMode.Sku;
+            ClearPendingError();
             _modeManager.SetMode(target);
             RaiseProcessed(new ScanOutcome.ModeCommand(target, rawCode));
             return;
@@ -270,6 +289,7 @@ public sealed class ScanProcessor
         // Step 3 — SN is the identity transform inside the pipeline, not a bypass (spec §5.7)
         if (_modeManager.CurrentMode == ScanMode.Sn)
         {
+            ClearPendingError();
             State = ScanPipelineState.Idle;
             Emit(rawCode);
             RaiseProcessed(new ScanOutcome.Emit(rawCode, rawCode));
@@ -306,6 +326,15 @@ public sealed class ScanProcessor
         }
 
         // 步骤 6 / Step 6
+        //
+        // ★ 成功的一枪把上一条错误提示清掉。错误现在是**提示**而不是待决状态
+        //   （见 PendingError）：工人重扫一次成功了，那条提示就该自己消失，
+        //   不该还要他去解除。出错那一刻恰恰是最不适合让人多做一步判断的时候。
+        // A successful scan clears the previous notice. An error is now a notice rather than a state
+        // awaiting a decision (see PendingError): when the operator rescans and it works, the notice
+        // should go by itself rather than needing to be dismissed — the moment an error appears is
+        // the worst moment to ask someone for an extra decision.
+        ClearPendingError();
         State = ScanPipelineState.Idle;
         Emit(parsed.Sku);
         RaiseProcessed(new ScanOutcome.Emit(parsed.Sku, rawCode));
@@ -380,46 +409,37 @@ public sealed class ScanProcessor
 
     /// <summary>
     /// 中文：
-    ///   强制发送待决错误里的**原始码**（规格 §10）。
-    ///   输出：真的发出去了返回 true；没有待决错误返回 false。
+    ///   ★ 这里曾经有 ForceSend 和 Cancel 两个出口（规格 §10），2026-09-15 一起去掉了。
     ///
-    ///   发的是原始码而不是部分解析出来的候选值：解析失败时我们对这个码的理解
-    ///   本来就是错的，拿一个错误理解的产物去发，比原样发出去更危险。
+    ///     ForceSend 的语义是"规则判定这枪不合格，但还是把原始码原样发进业务软件"。
+    ///     偶尔按一次是救急，而习惯性使用就是持续往仓库系统里灌未解析的原始码——
+    ///     更糟的是事后查不出来：业务系统里那条记录和正常记录长得一模一样，只有
+    ///     本程序的日志知道它是怎么进去的，而对账的人手上未必有这份日志。
+    ///
+    ///     去掉它并不损失能力，那条退路以更好的形式还在：**暂停**。工人点一下暂停、
+    ///     扫那个解析不了的码、再点恢复，原文照样进业务软件。同一件事，但它是显式的、
+    ///     鼠标可达的、界面上明晃晃写着"已暂停"、日志里记成 EmittedWhilePaused。
+    ///     一个临时旁路本来就该长这样，而不是藏在一个功能键后面。
+    ///
+    ///     Cancel 随之也不需要了：错误不再是一个要"决定"的状态（见 PendingError）。
+    ///
     /// English:
-    ///   Force-sends the pending error's raw code (spec §10), returning false when there is none.
+    ///   ForceSend and Cancel used to live here (spec §10) and were both removed on 2026-09-15.
     ///
-    ///   The raw code rather than a partially parsed candidate: when parsing failed our
-    ///   understanding of the code was wrong to begin with, and emitting the product of a wrong
-    ///   understanding is more dangerous than emitting it untouched.
+    ///   ForceSend meant "the rules rejected this scan, send the raw code into the business
+    ///   application anyway". Pressed occasionally it is a rescue; used habitually it steadily feeds
+    ///   unparsed codes into the warehouse system — and worse, untraceably: the resulting record
+    ///   looks exactly like a correct one, and only this program's log knows how it got there, a log
+    ///   whoever reconciles the data may not have.
+    ///
+    ///   Nothing is lost, because that escape survives in a better form: PAUSED. The operator pauses,
+    ///   scans the stubborn code, and resumes; the raw text reaches the business application just the
+    ///   same. The same act, but explicit, mouse-reachable, labelled on screen, and recorded as
+    ///   EmittedWhilePaused. A temporary bypass should look like that rather than hide behind a
+    ///   function key.
+    ///
+    ///   Cancel went with it: an error is no longer a state awaiting a decision (see PendingError).
     /// </summary>
-    public bool ForceSend()
-    {
-        if (PendingError is not { } pendingError)
-        {
-            return false;
-        }
-
-        Emit(pendingError.RawCode);
-        ClearPendingError();
-        RaiseProcessed(new ScanOutcome.ForceSent(pendingError.RawCode));
-        return true;
-    }
-
-    /// <summary>
-    /// 中文：取消待决错误，什么都不发。输出：真的取消了返回 true。
-    /// English: Cancels the pending error, emitting nothing. Returns whether there was one.
-    /// </summary>
-    public bool Cancel()
-    {
-        if (PendingError is not { } pendingError)
-        {
-            return false;
-        }
-
-        ClearPendingError();
-        RaiseProcessed(new ScanOutcome.Cancelled(pendingError.RawCode));
-        return true;
-    }
 
     /// <summary>
     /// 中文：清掉待决错误并回到空闲。

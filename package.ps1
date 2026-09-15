@@ -143,7 +143,17 @@ if (-not (Test-Path $sheetHtml)) {
         # 同样每次打包覆盖,免得两处对不上——对不上的那份迟早会被印出来。
         # A copy lives in docs so it can be printed without installing the program. Overwritten each
         # build as well, or the two disagree and the wrong one eventually gets printed.
-        Copy-Item $sheetPdf (Join-Path $root 'docs') -Force
+        # 复制失败不该让整个打包倒掉:最常见的原因是有人正开着这份 PDF 在看,
+        # 而发布件里那一份已经好了。警告一声,让人知道 docs 里那份这次没更新。
+        # A failed copy must not topple the build: the usual cause is someone reading the PDF, and
+        # the one in the release is already correct. Warn instead, so it is known that the copy in
+        # docs was not refreshed this time.
+        try {
+            Copy-Item $sheetPdf (Join-Path $root 'docs') -Force -ErrorAction Stop
+        } catch {
+            Write-Warning "docs 里那份 PDF 没能更新(多半正被打开着): $($_.Exception.Message)"
+            Write-Warning "The copy in docs was not refreshed (likely open elsewhere)."
+        }
     } else {
         Write-Warning "PDF 生成失败。 The PDF was not produced."
     }

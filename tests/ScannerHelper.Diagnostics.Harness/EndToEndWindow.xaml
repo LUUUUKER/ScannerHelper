@@ -87,10 +87,6 @@
                     <TextBlock Text="待决错误 / Pending error:" VerticalAlignment="Center" />
                     <TextBlock x:Name="PendingErrorText" Text="无 / none" Margin="6,0,0,0"
                                VerticalAlignment="Center" FontFamily="Consolas, Courier New, monospace" />
-                    <Button x:Name="ForceSendButton" Content="强制发送 / Force Send" Width="170" Height="26"
-                            Margin="14,0,0,0" Click="OnForceSendClicked" IsEnabled="False" />
-                    <Button x:Name="CancelButton" Content="取消 / Cancel" Width="120" Height="26"
-                            Margin="6,0,0,0" Click="OnCancelClicked" IsEnabled="False" />
                 </StackPanel>
 
             </StackPanel>

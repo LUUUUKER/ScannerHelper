@@ -4,11 +4,14 @@ Before writing or changing code, read:
 
 1. `docs/ARCHITECTURE_CHANGE_SERIAL.md` — **read this first.** The input architecture changed on
    2026-09-10 and this document governs where it disagrees with the spec.
-2. `docs/TASK_4B_FINDING_20260910.md` — why it changed: the measurement that killed the previous
+2. `docs/CHANGE_ERROR_HANDLING.md` — **出错之后怎么办，2026-09-15 改过。**
+   强制发送（F10）与取消（Esc）已取消；判定不合格的码永远不进业务软件；
+   原始码唯一的通道是 PAUSED。这份文件同样优先于规格。
+3. `docs/TASK_4B_FINDING_20260910.md` — why it changed: the measurement that killed the previous
    design. Read it before proposing anything involving `WH_KEYBOARD_LL` or Raw Input.
-3. `docs/SCANNER_HELPER_SPEC.md`
-4. `docs/IMPLEMENTATION_PLAN.md`
-5. `docs/TEST_PLAN_PHASE_A.md` — approved test cases for Tasks 1–3, plus nine resolved design decisions (D-1…D-9) that the implementation must honor
+4. `docs/SCANNER_HELPER_SPEC.md`
+5. `docs/IMPLEMENTATION_PLAN.md`
+6. `docs/TEST_PLAN_PHASE_A.md` — approved test cases for Tasks 1–3, plus nine resolved design decisions (D-1…D-9) that the implementation must honor
 
 These files are the source of truth. Do not silently reinterpret business behavior.
 
@@ -33,9 +36,14 @@ These files are the source of truth. Do not silently reinterpret business behavi
 - `PAUSED` is a required safety valve: hook passes everything through, and the control must be reachable **with the mouse alone** from both Full and Compact.
 - Silent-unhook heartbeat detection is required. The UI must never display a confident operational state it has not verified.
 - Startup scan mode is always SN and is never persisted.
-- F8 toggles SN/SKU and must only be triggered by a non-scanner physical keyboard.
-- F10 means Force Send raw scan only while an error is pending.
-- Esc cancels a pending failed scan.
+- The mode toggle (default **Insert**, configurable) must only be triggered by a non-scanner
+  physical keyboard; in serial mode this holds automatically. Mode can also be switched by
+  scanning a command barcode (`#SH:SN#` / `#SH:SKU#`), which is never forwarded to the
+  business application.
+- **Superseded (2026-09-15):** F10 Force Send and Esc Cancel are gone. A scan that fails parsing or
+  validation is **never** emitted; the screen shows which mode it failed in and offers "switch to
+  SN" / "switch to SKU". The only route for a raw, unparseable code into the business application is
+  PAUSED. See `docs/CHANGE_ERROR_HANDLING.md`. Do not reintroduce a force-send path.
 - Scanner raw input must not leak into the warehouse application. **In serial mode this is
   structural rather than something to enforce:** the scanner types nothing at all.
 - Scanner Helper's injected output must not be recaptured.

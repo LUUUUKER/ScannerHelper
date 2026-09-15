@@ -256,53 +256,33 @@ public class ScanProcessorTests
         Assert.Equal(ScanPipelineState.Idle, processor.State);
     }
 
-    [Fact] // SP10
-    public void Force_send_emits_the_raw_code()
-    {
-        _modeManager.SetMode(ScanMode.Sku);
-        var processor = CreateProcessor(
-            validator: SkuValidatorFactory.Create(new SkuValidationSettings
-            {
-                MinimumLength = 99,
-            }));
-
-        processor.OnScanReceived(RawCode);
-        Assert.True(_output.EmittedNothing);
-
-        Assert.True(processor.ForceSend());
-
-        // 发的是原始码，不是解析出来的 ABCDEFG（规格 §10）。
-        // The raw code, not the parsed ABCDEFG (spec §10).
-        Assert.Equal([RawCode], _output.EmittedText);
-        Assert.Null(processor.PendingError);
-        Assert.Equal(ScanPipelineState.Idle, processor.State);
-    }
-
-    [Fact] // SP11
-    public void Cancel_emits_nothing()
-    {
-        _modeManager.SetMode(ScanMode.Sku);
-        var processor = CreateProcessor(
-            validator: SkuValidatorFactory.Create(new SkuValidationSettings
-            {
-                MinimumLength = 99,
-            }));
-
-        processor.OnScanReceived(RawCode);
-        Assert.True(processor.Cancel());
-
-        Assert.True(_output.EmittedNothing);
-        Assert.Null(processor.PendingError);
-        Assert.Equal(ScanPipelineState.Idle, processor.State);
-    }
+    // ★ SP10（强制发送发出原始码）与 SP11（取消什么都不发）在 2026-09-15 退役。
+    //
+    //   它们钉的是 ForceSend / Cancel 两个方法，而那两个方法连同它们表达的业务
+    //   行为一起被去掉了（规格变更，见 docs/CHANGE_ERROR_HANDLING.md）。用例
+    //   跟着删，不是为了让编译通过——是因为它们钉的那件事**不该再发生**：
+    //   一个还在断言"规则判定不合格也能原样发出去"的用例，会在有人重新引入
+    //   这条路径时给出绿灯。
+    //
+    //   取代它们的是 PendingErrorNoticeTests（PE1~PE8）。
+    // SP10 (force send emits the raw code) and SP11 (cancel emits nothing) were retired on
+    // 2026-09-15. They held ForceSend and Cancel, and both methods were removed along with the
+    // business behaviour they expressed (a spec change; see docs/CHANGE_ERROR_HANDLING.md). The
+    // cases go with them not to make the build pass but because what they held must no longer
+    // happen: a case still asserting "a scan the rules rejected can go out unchanged" would give a
+    // green light to anyone reintroducing that path. PendingErrorNoticeTests (PE1-PE8) replace them.
 
     [Theory] // SP12
     [InlineData(false, 0)]
     [InlineData(true, 1)]
     public void Append_enter_is_exact_on_every_output_path(bool appendEnter, int expectedPerEmit)
     {
-        // 四条输出路径各发一次，回车总数必须恰好是四倍。
-        // One emission down each of the four paths; the Enter count must be exactly four times.
+        // ★ 现在是**三条**输出路径。强制发送那一条在 2026-09-15 去掉了
+        //   （见 ScanProcessor 里的说明），能力移到了暂停，而暂停本来就是
+        //   路径 3，所以这里少一条不是少测了一种情况。
+        // Three output paths now. Force Send was removed on 2026-09-15 (see the note in
+        // ScanProcessor) and its capability moved to PAUSED, which is already path 3 — so one fewer
+        // path here does not mean one fewer case covered.
         var processor = CreateProcessor(
             validator: SkuValidatorFactory.Create(new SkuValidationSettings()));
         processor.AppendEnterAfterScan = appendEnter;
@@ -314,24 +294,12 @@ public class ScanProcessorTests
         _modeManager.SetMode(ScanMode.Sku);
         processor.OnScanReceived(RawCode);
 
-        // 路径 3：强制发送 / Path 3: Force Send
-        processor.UpdateSkuRules(
-            SkuParserFactory.Create(new SkuParsingSettings
-            {
-                RuleType = SkuParsingRuleType.FixedPosition,
-                StartPosition = 90,
-                Length = 4,
-            }),
-            SkuValidatorFactory.Create(new SkuValidationSettings()));
-        processor.OnScanReceived(RawCode);
-        Assert.True(processor.ForceSend());
-
-        // 路径 4：暂停原样 / Path 4: raw while paused
+        // 路径 3：暂停原样 / Path 3: raw while paused
         processor.Pause();
         processor.OnScanReceived(RawCode);
 
-        Assert.Equal(4, _output.EmittedText.Count);
-        Assert.Equal(expectedPerEmit * 4, _output.EnterCount);
+        Assert.Equal(3, _output.EmittedText.Count);
+        Assert.Equal(expectedPerEmit * 3, _output.EnterCount);
     }
 
     [Fact] // SP13
@@ -392,65 +360,12 @@ public class ScanProcessorTests
         Assert.Equal(ScanPipelineState.Idle, processor.State);
     }
 
-    [Fact] // SP16
-    public void Force_send_is_recorded_as_its_own_outcome()
-    {
-        var outcomes = new List<ScanOutcome>();
-        _modeManager.SetMode(ScanMode.Sku);
-        var processor = CreateProcessor(
-            validator: SkuValidatorFactory.Create(new SkuValidationSettings
-            {
-                MinimumLength = 99,
-            }));
-        processor.ScanProcessed += (_, args) => outcomes.Add(args.Outcome);
-
-        processor.OnScanReceived(RawCode);
-        Assert.True(processor.ForceSend());
-
-        // ★ 强制发送是产品里唯一一个「明知有问题还是发出去」的动作，因此是最需要
-        //   留痕的一次输出。不记录的话，记录里就是「失败、什么都没发」之后直接跳到
-        //   下一枪，中间那次绕过规则的发送无迹可寻——规格 §19.1 的「静默的错误
-        //   数据」，具体形态就是这个。
-        // Force Send is the one action that emits something already known to be questionable, and
-        // therefore the output most in need of a record. Unrecorded, the trail shows a failure that
-        // emitted nothing followed by the next scan, with the rule-bypassing emission between them
-        // leaving no trace — the concrete shape of spec §19.1's silently wrong data.
-        Assert.Collection(
-            outcomes,
-            first => Assert.IsType<ScanOutcome.ValidationFailed>(first),
-            second => Assert.Equal(RawCode, Assert.IsType<ScanOutcome.ForceSent>(second).RawCode));
-    }
-
-    [Fact] // SP17
-    public void Cancel_is_recorded_as_its_own_outcome()
-    {
-        var outcomes = new List<ScanOutcome>();
-        _modeManager.SetMode(ScanMode.Sku);
-        var processor = CreateProcessor(
-            validator: SkuValidatorFactory.Create(new SkuValidationSettings
-            {
-                MinimumLength = 99,
-            }));
-        processor.ScanProcessed += (_, args) => outcomes.Add(args.Outcome);
-
-        processor.OnScanReceived(RawCode);
-        Assert.True(processor.Cancel());
-
-        // 取消意味着一枪数据没有进系统。工人多半会重扫，但如果他没有，那件货就漏了；
-        // 事后能看出「这里有一枪被丢掉了」，比看不出来强得多。
-        // A cancellation means one scan never reached the system. The operator usually rescans, but
-        // if they do not the item is simply missed, and seeing that afterwards beats not seeing it.
-        Assert.Collection(
-            outcomes,
-            first => Assert.IsType<ScanOutcome.ValidationFailed>(first),
-            second => Assert.Equal(RawCode, Assert.IsType<ScanOutcome.Cancelled>(second).RawCode));
-
-        Assert.True(_output.EmittedNothing);
-    }
-
     /// <summary>
-    /// 中文：一旦被调用就抛异常的解析器。用来证明某条路径**根本没走到解析**。
-    /// English: A parser that throws if called, used to prove a path never reaches parsing.
+    /// 中文：一调用就抛的解析器。用来证明某条路径**根本没去问解析器**——
+    ///       断言"结果对"只能说明结果对，断言"解析器没被调用"才能说明是旁路。
+    /// English: A parser that throws on any call, proving a path never consults it. Asserting the
+    ///          result is right only shows the result; asserting the parser was never asked is what
+    ///          shows the path bypassed it.
     /// </summary>
     private sealed class ThrowingSkuParser : ISkuParser
     {

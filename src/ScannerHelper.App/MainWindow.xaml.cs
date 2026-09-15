@@ -237,19 +237,15 @@ public partial class MainWindow : Window
     /// </summary>
     private void OnHotkeyPressed(object? sender, HotkeyPressedEventArgs e)
     {
-        switch (e.Hotkey)
+        // 只剩切换模式一个热键。F10 / Esc 随强制发送与取消在 2026-09-15 一起去掉
+        // （见 docs/CHANGE_ERROR_HANDLING.md），而少两个全局热键本身就是收益：
+        // 全局热键是系统独占的，注册着的每一个都在别的程序里少一个键可用。
+        // Only the mode toggle remains. F10 and Escape went with Force Send and Cancel on
+        // 2026-09-15 (see docs/CHANGE_ERROR_HANDLING.md), and two fewer global hotkeys is a gain in
+        // itself: they are system-exclusive, and each one registered is a key other programs lose.
+        if (e.Hotkey == ScannerHotkey.ToggleMode)
         {
-            case ScannerHotkey.ToggleMode:
-                Session?.ToggleMode();
-                break;
-
-            case ScannerHotkey.ForceSend:
-                Session?.ForceSend();
-                break;
-
-            case ScannerHotkey.Discard:
-                Session?.Discard();
-                break;
+            Session?.ToggleMode();
         }
     }
 
@@ -303,26 +299,17 @@ public partial class MainWindow : Window
             hotkeys.ToggleModeChord = configuredChord;
         }
 
+        // 暂停时连切换键也还回去。暂停是安全阀，它的承诺是"程序什么都不管"——
+        // 而占着一个全局热键不放，就是还在管着一件事（规格 §5.7）。
+        // Paused hands the toggle back too. The valve promises the program does nothing, and holding
+        // a system-wide hotkey is still doing something (spec §5.7).
         if (snapshot.IsPaused)
         {
             hotkeys.Unregister(ScannerHotkey.ToggleMode);
-            hotkeys.Unregister(ScannerHotkey.ForceSend);
-            hotkeys.Unregister(ScannerHotkey.Discard);
             return;
         }
 
         _isToggleHotkeyAvailable = hotkeys.Register(ScannerHotkey.ToggleMode);
-
-        if (snapshot.PendingErrorRawCode is not null)
-        {
-            hotkeys.Register(ScannerHotkey.ForceSend);
-            hotkeys.Register(ScannerHotkey.Discard);
-        }
-        else
-        {
-            hotkeys.Unregister(ScannerHotkey.ForceSend);
-            hotkeys.Unregister(ScannerHotkey.Discard);
-        }
     }
 
     /// <summary>
@@ -432,6 +419,7 @@ public partial class MainWindow : Window
         HazardStripe.Visibility = Visibility.Collapsed;
         DisconnectedBar.Visibility = Visibility.Collapsed;
         ModeOnResumeText.Visibility = Visibility.Collapsed;
+        ErrorModeBadge.Visibility = Visibility.Collapsed;
         ErrorCodeText.Visibility = Visibility.Collapsed;
         ErrorActions.Visibility = Visibility.Collapsed;
         SwitchHintText.Visibility = Visibility.Visible;
@@ -456,6 +444,14 @@ public partial class MainWindow : Window
             StateSubtitleText.Text = snapshot.LastScanFailureKey is { } key
                 ? strings[key]
                 : strings["ErrorPrompt"];
+            // 出错是在哪个模式下出的——见 XAML 里那段说明。
+            // Which mode the failure happened in; see the note in the XAML.
+            var failedInSn = snapshot.Mode == ScanMode.Sn;
+            ErrorModeBadge.Background = (Brush)FindResource(failedInSn ? "SnBrush" : "SkuBrush");
+            ErrorModeBadgeText.Text = Localizer.Format(
+                "ErrorInMode", ModeLabel(snapshot.Mode, strings));
+            ErrorModeBadge.Visibility = Visibility.Visible;
+
             ErrorCodeText.Text = pendingCode;
             ErrorCodeText.Visibility = Visibility.Visible;
             ErrorActions.Visibility = Visibility.Visible;
@@ -651,9 +647,11 @@ public partial class MainWindow : Window
         Activate();
     }
 
-    private void OnForceSendClicked(object sender, RoutedEventArgs e) => Session?.ForceSend();
+    private void OnChooseSnClicked(object sender, RoutedEventArgs e)
+        => Session?.SetMode(ScanMode.Sn);
 
-    private void OnDiscardClicked(object sender, RoutedEventArgs e) => Session?.Discard();
+    private void OnChooseSkuClicked(object sender, RoutedEventArgs e)
+        => Session?.SetMode(ScanMode.Sku);
 
     /// <summary>
     /// 中文：
@@ -725,6 +723,25 @@ public partial class MainWindow : Window
 
         _compactWindow = new CompactWindow();
         _compactWindow.ExpandRequested += (_, _) => ExpandFromCompact(activate: true);
+
+        // 小窗的 × = 退出程序：先展开成 Full，再走正常的关闭流程（确认框在那里）。
+        //
+        // ★ 关闭要再推迟一个调度周期，让 Full 窗口先画出来。紧接着 Show() 就弹
+        //   模态框的话，确认框会压在一个还没绘制的空窗口上——工人看到的是一个
+        //   白框加一个问句，而问句问的是"要退出吗"，他此刻连程序长什么样都还没
+        //   看见。
+        // The compact window's X means exit: expand to Full, then run the normal close, where the
+        // confirmation lives.
+        //
+        // The close is deferred one more dispatcher turn so the Full window paints first. Raising a
+        // modal dialog immediately after Show() puts the confirmation over an undrawn window — the
+        // operator gets a white rectangle and a question about exiting, before having seen the
+        // program at all.
+        _compactWindow.CloseRequested += (_, _) =>
+        {
+            ExpandFromCompact(activate: true);
+            Dispatcher.BeginInvoke(DispatcherPriority.Background, new Action(Close));
+        };
         _compactWindow.Show();
 
         if (Session is { } session)

@@ -215,12 +215,6 @@ public partial class EndToEndWindow : Window
                 validationFailed.RawCode,
                 $"校验失败 / validation failed：{validationFailed.Sku}"),
 
-            ScanOutcome.ForceSent forced => (
-                forced.RawCode, "★ 强制发送 / force-sent（绕过了规则）"),
-
-            ScanOutcome.Cancelled cancelled => (
-                cancelled.RawCode, "已取消，未发出 / cancelled, nothing sent"),
-
             _ => (string.Empty, outcome.ToString() ?? string.Empty),
         };
 
@@ -332,27 +326,6 @@ public partial class EndToEndWindow : Window
         Refresh();
     }
 
-    private void OnForceSendClicked(object sender, RoutedEventArgs e)
-    {
-        lock (_gate)
-        {
-            _output.BeginScan(_processor.PendingError?.RawCode ?? string.Empty);
-            _processor.ForceSend();
-        }
-
-        Refresh();
-    }
-
-    private void OnCancelClicked(object sender, RoutedEventArgs e)
-    {
-        lock (_gate)
-        {
-            _processor.Cancel();
-        }
-
-        Refresh();
-    }
-
     /// <summary>
     /// 中文：
     ///   把界面上填的固定位置规则应用下去。
@@ -438,8 +411,6 @@ public partial class EndToEndWindow : Window
         PauseButton.IsEnabled = !isPaused;
         ResumeButton.IsEnabled = isPaused;
 
-        ForceSendButton.IsEnabled = pendingRawCode is not null;
-        CancelButton.IsEnabled = pendingRawCode is not null;
     }
 
     /// <summary>

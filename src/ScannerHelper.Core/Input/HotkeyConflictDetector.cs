@@ -1,3 +1,29 @@
+// ⚠ 死代码提醒 / DEAD CODE
+//
+//   中文：
+//     本文件自 2026-09-15 起**没有任何生产代码使用**（只有它自己的用例在跑）。
+//
+//     它是串口改造之前那套热键路由的遗留：那时需要判断"这个按键来自扫码枪还是
+//     物理键盘"，并把 F10 / Esc 路由到强制发送与取消。这两件事现在都不存在了——
+//     串口模式下扫码枪发不出按键（ARCHITECTURE_CHANGE_SERIAL.md），而强制发送
+//     与取消已经取消（CHANGE_ERROR_HANDLING.md）。
+//
+//     留着它是为了避免在上线期做大改动，但**不要照它来做任何决定**：它描述的
+//     业务行为已经作废。下一个整理周期应当连同用例一起删除。
+//
+//   English:
+//     No production code has used this file since 2026-09-15; only its own cases exercise it.
+//
+//     It is a leftover of the pre-serial hotkey routing, which had to decide whether a keystroke came
+//     from the scanner or a physical keyboard and route F10 / Escape to Force Send and Cancel.
+//     Neither exists now: in serial mode the scanner emits no keystrokes at all
+//     (ARCHITECTURE_CHANGE_SERIAL.md), and Force Send and Cancel were removed
+//     (CHANGE_ERROR_HANDLING.md).
+//
+//     It is kept only to avoid a large change during a rollout. Do not take any decision from it —
+//     the business behaviour it describes is void. It should be deleted, with its cases, in the next
+//     cleanup.
+//
 // =============================================================================
 // HotkeyConflictDetector.cs
 //
