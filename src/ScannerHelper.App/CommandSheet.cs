@@ -46,6 +46,27 @@
 //   The human-readable content is printed under each barcode, because paper gets dirty, scuffed and
 //   torn — and that line is then the only way to tell which sheet this was.
 //
+//   ★ 印成**两张卡**，分页。
+//
+//     第一张是工位卡：切换模式的两枚码，工人一天扫几十次。
+//     第二张是装机卡：扫码枪自己的配置码，只有装机和排障时才用。
+//
+//     分开不是为了排版好看。装机卡上的「恢复出厂设置」会把枪打回 USB 键盘模式
+//     ——那恰恰是最危险的那个状态：本程序的串口一片安静、不报错，而条码原封
+//     不动地进了业务软件。把它和工人天天扫的码并排贴在工位上，早晚有人扫错一张，
+//     而扫错之后现场看不出任何异常。
+//
+// English:
+//   ...printed as two cards on separate pages. The first is for the workstation: the two
+//   mode-switch codes, scanned dozens of times a day. The second is for setup: the scanner's own
+//   configuration codes, used only when installing or recovering.
+//
+//   The separation is not for tidiness. The setup card's "restore factory defaults" puts the scanner
+//   back into USB keyboard mode — precisely the most dangerous state, where this program's serial
+//   port falls silent without error while barcodes go straight into the business application. Taped
+//   beside codes an operator scans all day, it would eventually be scanned by mistake, and nothing
+//   on site would look wrong afterwards.
+//
 // 包含的成员 / Members in this file:
 //   Open   生成并打开
 // =============================================================================
@@ -101,6 +122,42 @@ public static class CommandSheet
 
     /// <summary>
     /// 中文：
+    ///   扫码枪自己的配置码（**Tera D5100 专用**）。
+    ///
+    ///   ★ 这些内容是从随枪说明书上的条码里读出来的，不是本程序定义的。
+    ///     换一把别的枪，这四个字符串就毫无意义——甚至可能有别的含义。
+    ///     所以卡片上必须印明型号，代码里也记在这儿。
+    ///
+    ///   ★ 改动这里之后必须**打印出来实扫验证**。Code 128 的校验位只能保证
+    ///     "印出来的就是这段字符串"，保证不了"这段字符串是对的那一条"——
+    ///     后者只有枪本身能回答。
+    /// English:
+    ///   The scanner's own configuration codes, specific to the Tera D5100.
+    ///
+    ///   These strings were read out of the barcodes in the scanner's printed manual; they are not
+    ///   defined by this program. On a different scanner they mean nothing, or something else, which
+    ///   is why the card states the model and why this is recorded here.
+    ///
+    ///   Any change here must be verified by printing and scanning. Code 128's check digit only
+    ///   guarantees that what was printed is this string; whether this string is the right one can
+    ///   be answered only by the scanner itself.
+    /// </summary>
+    private static readonly (string Content, string Label, string Detail, bool IsHazard)[] SetupCodes =
+    [
+        ("%%SpecCode39", "① 恢复出厂设置 / Restore Defaults",
+            "把枪清回出厂状态。★ 执行后枪会退回 USB 键盘模式，必须接着走完 ②③④。",
+            true),
+        ("%%SpecCodeA8", "② 切到 2.4G 无线 / 2.4GHz Mode",
+            "让枪走无线，而不是蓝牙或有线。", false),
+        ("%%SpecCode99", "③ 配对 / Pairing",
+            "把枪和接收器配上。扫之前先拔下接收器，扫完再插回去。", false),
+        ("%%SpecCodeAE", "④ 切到虚拟串口 / USB-COM Mode",
+            "★ 最关键的一张。不扫它，枪就一直当键盘用——本程序收不到任何数据，"
+            + "而条码会原封不动地进业务软件。扫完拔插一次接收器。", false),
+    ];
+
+    /// <summary>
+    /// 中文：
     ///   生成两张条码纸并用默认浏览器打开。
     ///   输出：出错时返回异常消息，成功返回 null。
     /// English:
@@ -150,6 +207,18 @@ public static class CommandSheet
               @media print { .noprint { display: none; } }
               .noprint { background: #f2f2f2; border-radius: 2mm; padding: 4mm 5mm;
                          font-size: 10pt; margin-bottom: 8mm; }
+              .pagebreak { page-break-before: always; }
+              .setup { border: 0.8pt solid #444; border-radius: 2mm;
+                       padding: 5mm 5mm 3mm 5mm; margin-bottom: 5mm;
+                       page-break-inside: avoid; text-align: center; }
+              .setup.hazard { border: 2pt solid #B3261E; background: #FDF2F1; }
+              .setup .label { font-size: 13pt; font-weight: 700; margin: 0 0 1mm 0; }
+              .setup.hazard .label { color: #B3261E; }
+              .setup .detail { font-size: 9pt; color: #444; line-height: 1.6;
+                               margin: 0 0 3mm 0; text-align: left; }
+              .model { font-size: 9pt; color: #B3261E; font-weight: 700;
+                       border: 1pt solid #B3261E; border-radius: 2mm;
+                       padding: 3mm 4mm; margin: 0 0 6mm 0; line-height: 1.6; }
             </style>
             </head>
             <body>
@@ -181,11 +250,58 @@ public static class CommandSheet
               &nbsp;&nbsp;&nbsp;Test each sheet with the scanner after printing: ink spread can merge
               the thin bars, leaving a code that looks fine and does not scan.
             </p>
+            <div class="pagebreak"></div>
+            <h1>扫码枪配置码 / Scanner setup codes</h1>
+            <p class="lede">
+              装机、或者枪被误设置之后恢复用。平时用不到。<br>
+              For installing a scanner, or recovering one whose settings were changed. Not used
+              day to day.
+            </p>
+            <p class="model">
+              ★ 这一页只适用于 <b>Tera D5100</b>。别的型号扫这些码没有意义，甚至可能设成别的东西。<br>
+              This page applies to the <b>Tera D5100</b> only. On another model these codes do
+              nothing, or something else.
+              <br><br>
+              ★ 这一页<b>不要贴在工位上</b>，跟装机工具放在一起。①「恢复出厂设置」会把枪打回键盘模式
+              ——那时本程序收不到任何数据、也不会报错，而条码会原封不动地进业务软件。<br>
+              Keep this page <b>away from the workstation</b>, with the setup kit. Code ① returns the
+              scanner to keyboard mode, where this program receives nothing and reports nothing while
+              barcodes go straight into the business application.
+            </p>
+
+            """);
+
+        AppendSetupCards(html);
+
+        html.Append("""
             </body>
             </html>
             """);
 
         return html.ToString();
+    }
+
+    /// <summary>
+    /// 中文：把装机卡那几张码画出来。顺序就是说明书里的顺序，且编了号——
+    ///       装机的人照着 ①②③④ 走一遍即可，不必回去翻说明书。
+    /// English:
+    ///   Draws the setup card's codes in the manual's own order, numbered so whoever installs a
+    ///   scanner can follow ①②③④ without going back to the booklet.
+    /// </summary>
+    private static void AppendSetupCards(StringBuilder html)
+    {
+        foreach (var (content, label, detail, isHazard) in SetupCodes)
+        {
+            var hazardClass = isHazard ? " hazard" : string.Empty;
+
+            html.Append(CultureInfo.InvariantCulture,
+                $"<div class=\"setup{hazardClass}\">\n");
+            html.Append(CultureInfo.InvariantCulture, $"  <p class=\"label\">{label}</p>\n");
+            html.Append(CultureInfo.InvariantCulture, $"  <p class=\"detail\">{detail}</p>\n");
+            html.Append(BuildSvg(content));
+            html.Append(CultureInfo.InvariantCulture, $"  <p class=\"code\">{content}</p>\n");
+            html.Append("</div>\n\n");
+        }
     }
 
     private static void AppendSheet(StringBuilder html, string label, string subtitle, string content)
