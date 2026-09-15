@@ -85,5 +85,33 @@
             <Setter Property="Padding" Value="14,0" />
         </Style>
 
+        <!--
+            中文：
+              Compact 窗口里的按钮。只管尺寸，**外观交给系统默认样式**。
+
+              ★ 曾经试过扁平半透明样式（白边、色块透出来），看着是更协调，
+                但现场否了：实心灰按钮在饱和色块上的对比度明显更高，一眼就能
+                找到。工人常常是低头搬着货、用余光扫一下这个小窗，"好看"在
+                "看得见"面前不值一提。
+
+              ★ 三个按钮同高同字号。高度不一的按钮即使边缘对齐了也显得凌乱。
+            English:
+              Buttons in the Compact window. Sizing only; appearance is left to the system default.
+
+              A flat translucent style (white outline, panel colour showing through) was tried and
+              rejected in the field: solid grey buttons have visibly higher contrast on a saturated
+              panel and are found at a glance. The operator is usually handling goods and catching
+              this window out of the corner of their eye, and looking good counts for nothing against
+              being seen.
+
+              All three share a height and a font size; buttons of differing heights look untidy even
+              when their edges line up.
+        -->
+        <Style x:Key="CompactButton" TargetType="Button">
+            <Setter Property="Height" Value="30" />
+            <Setter Property="FontSize" Value="12" />
+            <Setter Property="Padding" Value="10,0" />
+        </Style>
+
     </Application.Resources>
 </Application>

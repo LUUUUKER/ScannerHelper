@@ -3,7 +3,7 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:loc="clr-namespace:ScannerHelper.App.Localization"
         Title="{Binding Source={x:Static loc:Localizer.Strings}, Path=[AppTitle]}"
-        Width="300" Height="132"
+        Width="300" Height="196"
         ResizeMode="NoResize"
         ShowInTaskbar="True"
         WindowStyle="ToolWindow"
@@ -22,6 +22,14 @@
             安全阀只在某一个视图里能点，等于工人得先想起来切视图——而需要它的时候
             往往正是最慌的时候。
 
+          ★ 切换模式按钮在这里也有一份。命令条码（见 ScanCommand）已经让工人可以
+            完全不碰键盘，但那要求墙上贴着纸；小窗上的这个按钮是随时随地都在的
+            那条路，而工人平时看的就是这个小窗。
+
+            它的显示规则和 Full 窗口**逐条一致**：未连接、有待决错误、暂停这三种
+            状态下都藏起来。两个视图对"现在能做什么"必须给出同一个答案——小窗上
+            点得动、展开后却没有这个按钮，工人会以为是程序坏了。
+
           ★ ShowInTaskbar 为 true。规格 §11.3 要求"绝不最小化到看不见的状态"：
             任务栏上那一项是工人找回它的最后一条路。
         English:
@@ -34,6 +42,15 @@
           The Pause button must be here too (spec §5.7 requires mouse reachability from both Full
           and Compact). A valve available in only one view makes the operator remember to switch
           views first — and the moment they need it is usually the moment they are flustered.
+
+          The mode-switch button is here too. Command barcodes (see ScanCommand) already let the
+          operator avoid the keyboard entirely, but that assumes sheets on the wall; this button is
+          the route that is always there, on the window the operator actually watches.
+
+          Its visibility follows the Full window's rules exactly: hidden while disconnected, while an
+          error is pending, and while paused. The two views must give the same answer about what can
+          be done right now — a button that works in Compact and is missing after expanding reads as
+          a broken program.
 
           ShowInTaskbar stays true: spec §11.3 forbids minimizing into invisibility, and the
           taskbar entry is the operator's last route back to it.
@@ -58,23 +75,71 @@
             <Border x:Name="DisconnectedBar" Height="5" VerticalAlignment="Top"
                     Background="#B3261E" Visibility="Collapsed" />
 
-            <DockPanel Margin="10,12,10,10">
-                <StackPanel DockPanel.Dock="Bottom" Orientation="Horizontal"
-                            HorizontalAlignment="Center" Margin="0,8,0,0">
-                    <Button x:Name="PauseButton" Height="26" MinWidth="94" FontSize="12"
-                            Click="OnPauseClicked" />
-                    <Button x:Name="ExpandButton" Height="26" MinWidth="94" FontSize="12"
-                            Margin="8,0,0,0" Click="OnExpandClicked"
-                            Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[Expand]}" />
+            <DockPanel Margin="14,12,14,12">
+                <StackPanel DockPanel.Dock="Bottom" Margin="0,10,0,0">
+                    <!--
+                        中文：
+                          ★ 两排**等宽、左右边缘对齐**。
+
+                            上排占满整行、下排两个按钮居中，加起来却比上排窄——那样
+                            四条竖边落在三个不同的位置上，看着就是没对齐。下排改成
+                            两等分的网格之后，两排的左右边缘严格重合。
+
+                          ★ 切换模式排在最上面、独占一整行。它是这三个里最常按的一个，
+                            而工人往往是低头搬着货、用余光找它；独占一行意味着他不用
+                            在两个按钮之间分辨哪个是哪个。
+
+                          ★ 三个按钮同高同字号。高度不一的按钮即使对齐了也显得凌乱。
+                        English:
+                          The two rows are equal in width with their left and right edges aligned.
+                          A full-width row above a centred pair that together came out narrower put
+                          four vertical edges in three different places, which simply reads as
+                          misaligned; splitting the lower row into two equal columns makes the edges
+                          coincide exactly.
+
+                          The mode switch comes first and takes a whole row: it is the most pressed
+                          of the three and the operator is usually finding it out of the corner of
+                          their eye while handling goods, so a row of its own means never having to
+                          tell two buttons apart.
+
+                          All three share a height and a font size; buttons of differing heights look
+                          untidy even when their edges line up.
+                    -->
+                    <Button x:Name="SwitchModeButton" Style="{StaticResource CompactButton}"
+                            Click="OnSwitchModeClicked"
+                            Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[SwitchMode]}" />
+
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button x:Name="PauseButton" Grid.Column="0"
+                                Style="{StaticResource CompactButton}" Click="OnPauseClicked" />
+                        <Button x:Name="ExpandButton" Grid.Column="2"
+                                Style="{StaticResource CompactButton}" Click="OnExpandClicked"
+                                Content="{Binding Source={x:Static loc:Localizer.Strings}, Path=[Expand]}" />
+                    </Grid>
                 </StackPanel>
 
                 <StackPanel VerticalAlignment="Center">
                     <TextBlock x:Name="StateTitleText" Foreground="{StaticResource OnStateBrush}"
                                FontSize="24" FontWeight="Bold" HorizontalAlignment="Center"
                                TextAlignment="Center" />
+                    <!--
+                        中文：最近一枪的内容。字号从 11 提到 12，并且给足换行的余地——
+                              之前窗口高度不够，长一点的条码会被下边缘切掉一截，
+                              而一个显示不全的条码比不显示更坏：工人会以为自己扫到的
+                              就是看到的那一段。
+                        English: The most recent scan. The size goes from 11 to 12 with room to wrap:
+                                 the window was too short before and a longer barcode was clipped by
+                                 the bottom edge — and a half-shown barcode is worse than none, since
+                                 the operator takes the visible part for what was scanned.
+                    -->
                     <TextBlock x:Name="StateSubtitleText" Foreground="{StaticResource OnStateBrush}"
-                               FontSize="11" Opacity="0.9" HorizontalAlignment="Center"
-                               TextAlignment="Center" TextWrapping="Wrap" Margin="6,2,6,0" />
+                               FontSize="12" Opacity="0.9" HorizontalAlignment="Center"
+                               TextAlignment="Center" TextWrapping="Wrap" Margin="4,4,4,0" />
                 </StackPanel>
             </DockPanel>
         </Grid>

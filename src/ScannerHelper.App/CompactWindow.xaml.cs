@@ -109,12 +109,29 @@ public partial class CompactWindow : Window
         HazardStripe.Visibility = Visibility.Collapsed;
         DisconnectedBar.Visibility = Visibility.Collapsed;
 
+        // ★ 切换按钮默认可见，由下面三个分支各自收回去——和 Full 窗口逐条一致。
+        //
+        //   未连接时藏起来：没有码会进来，切模式是个无意义的动作，而一个按下去
+        //   什么都不发生的按钮会让工人怀疑是不是程序卡了。
+        //   待决错误时藏起来：那时在等一个决定（F10 / Esc），中途改模式只会让
+        //   那一枪的结局更难说清。
+        //   暂停时藏起来：暂停绕过了全部规则，此刻的"模式"根本不参与任何事。
+        //
+        // Visible by default and withdrawn by each of the three branches below, exactly as the Full
+        // window does. Hidden while disconnected, because no code is arriving and a button that does
+        // nothing makes the operator suspect the program has hung; hidden while an error is pending,
+        // because a decision is being waited on (F10 / Esc) and changing mode midway only muddies
+        // that scan's outcome; hidden while paused, because pausing bypasses every rule and the mode
+        // takes part in nothing.
+        SwitchModeButton.Visibility = Visibility.Visible;
+
         if (!snapshot.IsConnected)
         {
             StatePanel.Background = (Brush)FindResource("DisconnectedBrush");
             DisconnectedBar.Visibility = Visibility.Visible;
             StateTitleText.Text = "⛔";
             StateSubtitleText.Text = strings["Disconnected"];
+            SwitchModeButton.Visibility = Visibility.Collapsed;
         }
         else if (snapshot.PendingErrorRawCode is { } pendingCode)
         {
@@ -122,12 +139,14 @@ public partial class CompactWindow : Window
             HazardStripe.Visibility = Visibility.Visible;
             StateTitleText.Text = "⚠";
             StateSubtitleText.Text = pendingCode;
+            SwitchModeButton.Visibility = Visibility.Collapsed;
         }
         else if (snapshot.IsPaused)
         {
             StatePanel.Background = (Brush)FindResource("PausedBrush");
             StateTitleText.Text = "⏸  " + strings["PausedHeading"];
             StateSubtitleText.Text = strings["PausedSubtitle"];
+            SwitchModeButton.Visibility = Visibility.Collapsed;
         }
         else
         {
@@ -194,6 +213,32 @@ public partial class CompactWindow : Window
             session.Pause();
         }
 
+        Refresh(session.Snapshot());
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   切换 SN / SKU。
+    ///
+    ///   ★ 切完立刻按新快照重画。小窗是靠 Full 窗口定时推快照刷新的，中间隔着
+    ///     一个刷新周期——工人按下去之后那几百毫秒里看到的还是旧模式，而他会
+    ///     以为没按上，于是再按一次，正好又切回去了。
+    /// English:
+    ///   Toggles SN/SKU.
+    ///
+    ///   The view is redrawn from the new snapshot immediately. Compact is refreshed by snapshots
+    ///   pushed from the Full window on a timer, leaving a gap in which the operator still sees the
+    ///   old mode, concludes the press did not register, presses again — and lands back where they
+    ///   started.
+    /// </summary>
+    private void OnSwitchModeClicked(object sender, RoutedEventArgs e)
+    {
+        if (Session is not { } session)
+        {
+            return;
+        }
+
+        session.ToggleMode();
         Refresh(session.Snapshot());
     }
 
