@@ -265,9 +265,42 @@ public partial class CompactWindow : Window
             return;
         }
 
+        // 工人点了小窗的 ×。这不是退出，是展开回大窗（规格 §11.3：绝不最小化到
+        // 看不见的状态），所以先把这次关闭挡下来。
         e.Cancel = true;
         _isClosingForExpand = true;
-        ExpandRequested?.Invoke(this, EventArgs.Empty);
+
+        // ★ 必须**异步**发这个通知，不能在这儿直接调。
+        //
+        //   接这个事件的是 MainWindow.ExpandFromCompact，而它头一件事就是
+        //   compact.Close()——也就是在本窗口自己的 Closing 事件里再关它一次。
+        //   WPF 对此直接抛 InvalidOperationException（"Cannot ... call Close
+        //   while a Window is closing"），而界面线程上没人接，进程当场死掉。
+        //
+        //   这个崩溃的代价比"关不掉"大得多：退出确认没弹过、设置没存、诊断日志
+        //   里连 Stopped 都没有——事后看日志的人只看到记录在 Connected 那一行
+        //   戛然而止，而那正是规格 §15 要回答却答不上来的情形。工人看到的则是
+        //   窗口僵住几十秒（Windows 在收集崩溃转储）。
+        //
+        //   BeginInvoke 把展开推到这次关闭处理完之后，那时本窗口已经不在
+        //   "正在关闭"状态里，ExpandFromCompact 关它就是合法的。
+        //
+        // The notification must be raised asynchronously rather than called here.
+        //
+        // MainWindow.ExpandFromCompact receives it and immediately calls compact.Close() — closing
+        // this window from inside its own Closing event. WPF throws InvalidOperationException
+        // ("Cannot ... call Close while a Window is closing"), nothing on the UI thread catches it,
+        // and the process dies on the spot.
+        //
+        // That crash costs far more than a window that will not close: the exit confirmation never
+        // appears, settings are not saved, and the diagnostic log has no Stopped line — whoever
+        // reads it later sees the record simply stop after Connected, exactly the situation spec §15
+        // exists to explain. What the operator sees is a window frozen for tens of seconds while
+        // Windows collects a crash dump.
+        //
+        // BeginInvoke defers the expansion until after this close is handled, by which point the
+        // window is no longer closing and ExpandFromCompact may legitimately close it.
+        Dispatcher.BeginInvoke(() => ExpandRequested?.Invoke(this, EventArgs.Empty));
     }
 
     private void SaveBounds()

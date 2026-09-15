@@ -205,6 +205,17 @@ public static class UiStrings
         ["SettingsDiagnostics"] = "Diagnostics",
         // 热键一节（现场反馈：F8 在不同电脑上被不同软件占用）。
         // The hotkey section (field report: F8 is taken by different software on different PCs).
+        // 漏网异常时的提示。写清楚两件事：扫码停了，以及日志在哪儿——
+        // 工人唯一能做的就是重开程序，而开发者需要的是那个文件。
+        // Shown for an unhandled exception. It states the two things that matter: scanning has
+        // stopped, and where the log is — restarting is all the operator can do, and that file is
+        // what the developer will need.
+        ["FaultTitle"] = "Scanner Helper hit an error",
+        ["FaultMessage"] =
+            "Scanner Helper ran into an unexpected error and has to close.\n\n"
+            + "Scans are no longer being processed. Start it again to carry on.\n\n"
+            + "The details were written to the log folder (Settings -> Open the log folder).",
+
         ["SettingsHotkeyGroup"] = "Mode switch key",
         ["SettingsToggleKey"] = "Key",
 
@@ -341,6 +352,12 @@ public static class UiStrings
         ["SettingsErrorSound"] = "一枪没发出去时响一声",
         ["SettingsErrorSoundHint"] = "这一声最值得开：出错时你可能正低头看货，看不到屏幕上的红色。",
         ["SettingsDiagnostics"] = "诊断日志",
+        ["FaultTitle"] = "扫码助手出错了",
+        ["FaultMessage"] =
+            "扫码助手遇到一个意料之外的错误，必须关闭。\n\n"
+            + "扫码已经停止处理了，重新打开程序即可继续。\n\n"
+            + "详细情况已经写进日志文件夹（设置 → 打开日志文件夹）。",
+
         ["SettingsHotkeyGroup"] = "模式切换按键",
         ["SettingsToggleKey"] = "按键",
         ["HotkeyAvailable"] = "✓  这台电脑上可用",

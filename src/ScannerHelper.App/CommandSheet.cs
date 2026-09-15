@@ -166,12 +166,52 @@ public static class CommandSheet
     /// </summary>
     public static string? Open()
     {
+        var path = Path.Combine(Path.GetTempPath(), "扫码助手-模式切换条码.html");
+
+        if (Write(path) is { } failure)
+        {
+            return failure;
+        }
+
         try
         {
-            var path = Path.Combine(Path.GetTempPath(), "扫码助手-模式切换条码.html");
-            File.WriteAllText(path, BuildHtml(), new UTF8Encoding(true));
-
             Process.Start(new ProcessStartInfo(path) { UseShellExecute = true });
+            return null;
+        }
+        catch (Exception exception)
+        {
+            return exception.Message;
+        }
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   把条码页写到指定路径，不打开浏览器。
+    ///   输出：出错时返回异常消息，成功返回 null。
+    ///
+    ///   ★ 打包脚本用它把同一份内容转成随包发的 PDF。
+    ///
+    ///     PDF 必须由**程序本身**产出，不能是谁手工导出一次然后提交上去。条码的
+    ///     内容（#SH:SN# 这些）由代码定义，而一份手工导出的 PDF 会和代码各自
+    ///     演化——某天前缀改了，随包发的 PDF 还是旧的，印出来贴到墙上扫下去
+    ///     什么都不会发生，且没有人知道该更新它。这正是本文件开头拒绝"把条码
+    ///     印进文档"的那条理由，对 PDF 同样适用。
+    /// English:
+    ///   Writes the sheet to a path without opening a browser.
+    ///
+    ///   The packaging script uses this to turn the same content into the PDF that ships with the
+    ///   release. That PDF has to come from the program rather than from someone exporting it once
+    ///   by hand: the barcode content (#SH:SN# and the rest) is defined in code, and a hand-exported
+    ///   PDF evolves separately — the day the prefix changes, the shipped PDF is still the old one,
+    ///   printing it puts a sheet on the wall that does nothing when scanned, and nobody knows it
+    ///   needs updating. It is the reason this file opens with for not printing barcodes into
+    ///   documents, and it applies to the PDF just the same.
+    /// </summary>
+    public static string? Write(string path)
+    {
+        try
+        {
+            File.WriteAllText(path, BuildHtml(), new UTF8Encoding(true));
             return null;
         }
         catch (Exception exception)

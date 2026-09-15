@@ -80,6 +80,77 @@ Copy-Item (Join-Path $root 'tools\检查扫码枪.ps1') $tools
 Copy-Item (Join-Path $root 'tools\检查扫码枪.bat') $tools
 
 $exe  = Join-Path $outDir 'ScannerHelper.exe'
+
+# ---------------------------------------------------------------- 条码 PDF
+# 中文:
+#   把条码页转成随包发的 PDF。
+#
+#   ★ 由**程序本身**产出,不是谁手工导出一次然后提交上去。
+#
+#     条码的内容(#SH:SN# 这些)由代码定义。手工导出的 PDF 会和代码各自演化——
+#     某天前缀改了,随包的 PDF 还是旧的,印出来贴到墙上扫下去什么都不会发生,
+#     而没有人知道该更新它。所以这一步每次打包都重跑。
+#
+#   ★ 用 Edge 无头打印,不引第三方 PDF 库。Windows 上 Edge 一定在,而发布件
+#     的依赖越少越好(规格 §22.1:仓库 IT 按哈希加白名单)。
+#     Edge 找不到就跳过并警告——PDF 是方便打印用的,不该让打包失败。
+# English:
+#   Renders the sheet to the PDF that ships with the release, produced by the program rather than
+#   exported once by hand: the barcode content is defined in code, and a hand-made PDF drifts from
+#   it — the day the prefix changes, the shipped PDF is the old one, and a sheet that does nothing
+#   when scanned goes onto a wall with nobody knowing it needs replacing. So this reruns every build.
+#
+#   Edge prints it headlessly rather than pulling in a PDF library: Edge is always present on
+#   Windows and the artifact is better off with fewer dependencies (spec §22.1, where warehouse IT
+#   allow-lists by hash). A missing Edge warns and skips — the PDF is a printing convenience and
+#   must not fail the build.
+$sheetHtml = Join-Path $env:TEMP 'scannerhelper-sheets.html'
+$sheetPdf  = Join-Path $outDir '模式切换与配置条码.pdf'
+
+# Start-Process -Wait 而不是 & 调用:见下面 Edge 那一步的说明,同一条理由。
+# Start-Process -Wait rather than the call operator; see the note on the Edge step below.
+Start-Process -FilePath $exe -ArgumentList '--sheets', $sheetHtml -Wait -NoNewWindow
+
+$edge = @(
+    "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe",
+    "$env:ProgramFiles\Microsoft\Edge\Application\msedge.exe"
+) | Where-Object { Test-Path $_ } | Select-Object -First 1
+
+if (-not (Test-Path $sheetHtml)) {
+    Write-Warning "条码页没有生成,跳过 PDF。 The sheet was not produced; skipping the PDF."
+} elseif (-not $edge) {
+    Write-Warning "找不到 Edge,跳过 PDF。 Edge was not found; skipping the PDF."
+} else {
+    # ★ 用 Start-Process,不要用 & 加 2>&1。
+    #
+    #   Edge 无头模式会往 stderr 写一行无害的诊断,而本脚本开头是
+    #   $ErrorActionPreference = 'Stop'——Windows PowerShell 5.1 会把原生程序的
+    #   stderr 包成 NativeCommandError 当成终止性错误,于是打包在"PDF 其实已经
+    #   生成了"的情况下报错退出。
+    # Start-Process rather than the call operator with 2>&1: headless Edge writes a harmless line to
+    # stderr, and with $ErrorActionPreference = 'Stop' at the top of this script, Windows PowerShell
+    # 5.1 wraps a native command's stderr in a NativeCommandError and treats it as terminating —
+    # failing the build although the PDF was produced.
+    $fileUrl = 'file:///' + $sheetHtml.Replace('\', '/')
+
+    Start-Process -FilePath $edge -Wait -NoNewWindow -ArgumentList @(
+        '--headless', '--disable-gpu', '--no-pdf-header-footer',
+        "--print-to-pdf=$sheetPdf", $fileUrl
+    )
+
+    if (Test-Path $sheetPdf) {
+        # docs 里也放一份,方便不装程序的人直接打印(用户要求)。
+        # 同样每次打包覆盖,免得两处对不上——对不上的那份迟早会被印出来。
+        # A copy lives in docs so it can be printed without installing the program. Overwritten each
+        # build as well, or the two disagree and the wrong one eventually gets printed.
+        Copy-Item $sheetPdf (Join-Path $root 'docs') -Force
+    } else {
+        Write-Warning "PDF 生成失败。 The PDF was not produced."
+    }
+
+    Remove-Item $sheetHtml -ErrorAction SilentlyContinue
+}
+
 $hash = (Get-FileHash $exe -Algorithm SHA256).Hash
 
 Write-Host ""

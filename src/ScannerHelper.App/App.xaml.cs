@@ -104,6 +104,26 @@ public partial class App : Application
 
     private void OnStartup(object sender, StartupEventArgs e)
     {
+        // 步骤 0 —— 界面线程上的漏网异常 / Step 0 — unhandled exceptions on the UI thread
+        DispatcherUnhandledException += OnUnhandledException;
+
+        // ★ 打包用的旁路：--sheets <路径> 只写出条码页然后退出。
+        //
+        //   放在**最前面**，在单实例互斥体和串口之前。打包时工位上很可能正开着
+        //   一个实例——那时去抢互斥体会弹"已经在运行"的框，去开串口会失败，
+        //   而这件事和它们都没有关系：它只是把一份 HTML 写到磁盘上。
+        //
+        // A packaging bypass: --sheets <path> writes the sheet and exits. It comes first, before the
+        // single-instance mutex and the serial port, because an instance is likely already running
+        // when a package is built — taking the mutex would raise "already running" and opening the
+        // port would fail, neither of which has anything to do with writing one HTML file to disk.
+        if (e.Args is ["--sheets", var sheetPath])
+        {
+            var sheetFailure = CommandSheet.Write(sheetPath);
+            Shutdown(sheetFailure is null ? 0 : 1);
+            return;
+        }
+
         // 步骤 1 —— 单实例 / Step 1 — single instance
         _singleInstanceMutex = new Mutex(initiallyOwned: true, SingleInstanceMutexName, out var isFirst);
 
@@ -231,6 +251,77 @@ public partial class App : Application
 
         MessageBox.Show(
             owner, message, Localizer.Get("AppTitle"), MessageBoxButton.OK, MessageBoxImage.Warning);
+    }
+
+    /// <summary>
+    /// 中文：
+    ///   界面线程上没人接的异常。
+    ///
+    ///   ★ 这道网是 2026-09-15 一次真实崩溃换来的：小窗的 × 触发了一处非法的
+    ///     重入关闭，WPF 抛异常、没人接，进程当场死掉。而那次崩溃**在诊断日志里
+    ///     没有留下任何痕迹**——记录停在 Connected 那一行就没有了。事后看日志的
+    ///     人会以为程序还在正常运行，这正是规格 §15 要回答却答不上来的情形。
+    ///
+    ///   ★ 先记日志，再告诉工人，最后**干净地退出**。
+    ///
+    ///     不吞掉异常继续跑：出了未知异常之后程序的状态是未定义的，而这个程序
+    ///     负责往业务软件里打字，带病运行可能把错的东西发进仓库系统——比停下来
+    ///     坏得多。
+    ///
+    ///     也不放任它崩：放任的话 Windows 错误报告会让窗口僵在那里几十秒收集转储，
+    ///     工人看到的是一个没有任何解释的死窗口。主动退出让这件事在一秒内结束，
+    ///     并且给出一句人话。
+    /// English:
+    ///   An exception nobody caught on the UI thread.
+    ///
+    ///   This net was paid for by a real crash on 2026-09-15: the compact window's close button
+    ///   triggered an illegal re-entrant Close, WPF threw, nothing caught it, and the process died —
+    ///   leaving no trace in the diagnostic log, whose record simply stopped after Connected. Anyone
+    ///   reading it afterwards would assume the program was still running, exactly the situation
+    ///   spec §15 exists to explain.
+    ///
+    ///   The handler logs, tells the operator, and exits cleanly. It does not swallow and continue:
+    ///   after an unknown exception the program's state is undefined, and this program types into
+    ///   the business application — carrying on could send wrong data into the warehouse system,
+    ///   which is worse than stopping. Nor does it let the crash stand: Windows Error Reporting then
+    ///   freezes the window for tens of seconds collecting a dump, leaving the operator with a dead
+    ///   window and no explanation. Exiting deliberately ends it in a second, with a sentence a
+    ///   person can read.
+    /// </summary>
+    private void OnUnhandledException(
+        object sender, System.Windows.Threading.DispatcherUnhandledExceptionEventArgs e)
+    {
+        e.Handled = true;
+
+        try
+        {
+            _log?.Write(new DiagnosticEvent(
+                DateTimeOffset.Now,
+                DiagnosticEventKind.Fault,
+                Detail: e.Exception.ToString()));
+        }
+        catch (Exception)
+        {
+            // 记不下来也要继续走完退出流程。见下面那句：现在最要紧的是干净地停下来。
+            // Even if it cannot be recorded, the shutdown must still run: stopping cleanly is what
+            // matters now.
+        }
+
+        try
+        {
+            MessageBox.Show(
+                Localizer.Get("FaultMessage"),
+                Localizer.Get("FaultTitle"),
+                MessageBoxButton.OK,
+                MessageBoxImage.Error);
+        }
+        catch (Exception)
+        {
+            // 连提示框都弹不出来，就别再折腾了，直接退。
+            // If even the dialog fails, stop trying and just exit.
+        }
+
+        Shutdown();
     }
 
     private void OnExit(object sender, ExitEventArgs e)
